@@ -1,5 +1,6 @@
 import sqlite3 from 'sqlite3';
 import path from 'path';
+import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
 import { ViolationRecord, AnalyticsStats } from '../types';
 
@@ -9,7 +10,12 @@ export class DatabaseService {
   private ready: Promise<void>;
 
   constructor(dbPath?: string) {
-    this.dbPath = dbPath || path.resolve(__dirname, process.env.DB_PATH || '../../../data/traffic_violations.db');
+    const projectRoot = path.resolve(__dirname, '../../../');
+    const dataDir = path.join(projectRoot, 'data');
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+    this.dbPath = dbPath || process.env.DB_PATH || path.join(dataDir, 'traffic_violations.db');
     this.db = new sqlite3.Database(this.dbPath);
     this.ready = this.init();
   }

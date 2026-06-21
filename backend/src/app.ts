@@ -33,6 +33,10 @@ const evidenceDir = path.resolve(__dirname, '../../traffic_violation_project/evi
 if (!fs.existsSync(evidenceDir)) fs.mkdirSync(evidenceDir, { recursive: true });
 app.use('/evidence', express.static(evidenceDir));
 
+const annotatedDir = path.resolve(__dirname, '../annotated');
+if (!fs.existsSync(annotatedDir)) fs.mkdirSync(annotatedDir, { recursive: true });
+app.use('/annotated', express.static(annotatedDir));
+
 app.use('/api', apiRoutes);
 
 app.get('/', (_req, res) => {

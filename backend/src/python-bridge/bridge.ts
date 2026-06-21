@@ -6,7 +6,8 @@ export class PythonBridge {
   private modulePath: string;
 
   constructor() {
-    this.pythonPath = process.env.PYTHON_PATH || 'python3';
+    const defaultPython = process.platform === 'win32' ? 'python' : 'python3';
+    this.pythonPath = process.env.PYTHON_PATH || defaultPython;
     this.modulePath = path.resolve(__dirname, process.env.PYTHON_MODULE_PATH || '../../../traffic_violation_project');
   }
 

@@ -45,7 +45,19 @@ export const getJobStatus = async (req: Request, res: Response): Promise<void> =
     const { jobId } = req.params;
     const status = await detectionService.getJobStatus(jobId);
     if (!status) { res.status(404).json({ success: false, error: 'Job not found' }); return; }
-    res.json({ success: true, ...status });
+    res.json({ success: true, status: status.status, progress: status.progress, message: status.message });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+export const getJobResults = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { jobId } = req.params;
+    const status = await detectionService.getJobStatus(jobId);
+    if (!status) { res.status(404).json({ success: false, error: 'Job not found' }); return; }
+    if (status.status !== 'complete') { res.status(400).json({ success: false, error: 'Job is not complete yet' }); return; }
+    res.json({ success: true, result: status.result });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }

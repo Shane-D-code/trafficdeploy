@@ -9,7 +9,7 @@ export class NotificationServer extends EventEmitter {
 
   constructor(server: HttpServer) {
     super();
-    this.wss = new WebSocketServer({ server });
+    this.wss = new WebSocketServer({ server, path: '/ws' });
     this.setupWebSocket();
     this.startHeartbeat();
     console.log(`WebSocket server attached to HTTP server`);

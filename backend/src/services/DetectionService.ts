@@ -25,6 +25,8 @@ function getWS(): any {
   return ws;
 }
 
+const JOB_TIMEOUT_MS = 600000; // 10 minutes
+
 export class DetectionService extends EventEmitter {
   private bridge: PythonBridge;
   private db: DatabaseService;
