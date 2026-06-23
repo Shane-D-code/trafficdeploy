@@ -333,7 +333,7 @@ const Detection: React.FC = () => {
             {detectMutation.isPending ? (
               <HudSpinner size="lg" text="Running AI detection" />
             ) : (
-              <DetectionCanvas image={preview} violations={violations} annotatedImageUrl={annotatedImageUrl} onViolationClick={setSelectedViolation} />
+              <DetectionCanvas image={preview} violations={violations} annotatedImageUrl={annotatedImageUrl} onViolationClick={setSelectedViolation} confidenceThreshold={confidence} />
             )}
           </HudCard>
 

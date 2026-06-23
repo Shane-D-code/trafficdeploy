@@ -65,11 +65,9 @@ export class DetectionService extends EventEmitter {
       jobEntry.progress = 100;
       jobEntry.updatedAt = new Date().toISOString();
 
-      const annotatedImagePath = result.annotated_image_path || null;
-      const annotatedImageUrl = annotatedImagePath ? `/evidence/${path.basename(annotatedImagePath)}` : null;
       const originalImageUrl = `/uploads/${path.basename(imagePath)}`;
 
-      jobEntry.result = { ...result, annotated_image_url: annotatedImageUrl, annotated_image_path: annotatedImagePath };
+      jobEntry.result = { ...result, annotated_image_url: originalImageUrl, original_image_url: originalImageUrl };
       this.jobs.set(jobId, jobEntry);
       await this.db.updateJob(jobEntry).catch(e => console.error('Failed to update job:', e));
 
@@ -84,11 +82,10 @@ export class DetectionService extends EventEmitter {
             ...violation,
             job_id: jobId,
             image_path: originalImageUrl,
-            annotated_image_path: annotatedImagePath,
             metadata: meta
           });
           savedCount++;
-          getWS().broadcastViolation({ ...violation, jobId, annotatedImagePath, savedAt: new Date().toISOString() });
+          getWS().broadcastViolation({ ...violation, jobId, originalImageUrl, savedAt: new Date().toISOString() });
         } catch (error) {
           console.error('Failed to save violation:', error);
         }
@@ -96,7 +93,7 @@ export class DetectionService extends EventEmitter {
 
       getWS().broadcastJobComplete(jobId, {
         ...result,
-        annotated_image_url: annotatedImageUrl,
+        original_image_url: originalImageUrl,
         savedCount,
         totalViolations: result.violations.length
       });
@@ -144,7 +141,6 @@ export class DetectionService extends EventEmitter {
       await this.db.updateJob(jobEntry).catch(e => console.error('Failed to update job:', e));
 
       let savedCount = 0;
-      const annotatedImagePath = result.annotated_image_path || null;
       const originalImageUrl = `/uploads/${path.basename(videoPath)}`;
       const violationCount = result.violations?.length || 1;
       const perViolationMs = Math.round(inferenceTimeMs / violationCount);
@@ -156,11 +152,10 @@ export class DetectionService extends EventEmitter {
               ...violation,
               job_id: jobId,
               image_path: originalImageUrl,
-              annotated_image_path: annotatedImagePath,
               metadata: meta
             });
             savedCount++;
-            getWS().broadcastViolation({ ...violation, jobId, annotatedImagePath, savedAt: new Date().toISOString() });
+            getWS().broadcastViolation({ ...violation, jobId, originalImageUrl, savedAt: new Date().toISOString() });
           } catch (error) {
             console.error('Failed to save violation:', error);
           }

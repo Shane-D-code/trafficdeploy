@@ -89,10 +89,10 @@ try:
     print(f"  detect_violations_json: OK")
     print(f"  Violations: {len(result.get('violations', []))}")
     print(f"  Stats: {json.dumps(result.get('stats', {}))}")
-    print(f"  annotated_image_path: {result.get('annotated_image_path')}")
+    print(f"  original_image_path: {result.get('original_image_path')}")
     
-    if result.get('annotated_image_path') and os.path.exists(result['annotated_image_path']):
-        print(f"  Annotated file exists: {os.path.getsize(result['annotated_image_path'])} bytes")
+    if result.get('original_image_path') and os.path.exists(result['original_image_path']):
+        print(f"  Original file exists: {os.path.getsize(result['original_image_path'])} bytes")
 except Exception as e:
     print(f"  FAILED: {e}")
     import traceback; traceback.print_exc()

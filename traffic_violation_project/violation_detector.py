@@ -441,9 +441,8 @@ class ViolationDetector:
             names = result.names
 
             for box, conf, cls_id in zip(boxes, confs, cls_ids):
-                class_name = _standardize_class_name(
-                    names.get(cls_id, f"class_{cls_id}")
-                )
+                original_class_name = names.get(cls_id, f"class_{cls_id}")
+                class_name = _standardize_class_name(original_class_name)
                 detections.append(
                     {
                         "box": box.tolist(),
@@ -451,6 +450,7 @@ class ViolationDetector:
                         "confidence": float(conf),
                         "class_id": int(cls_id),
                         "class_name": class_name,
+                        "original_class_name": original_class_name,
                     }
                 )
 
@@ -604,40 +604,27 @@ class ViolationDetector:
                         }
                     )
 
-        # NO SEATBELT
-        if no_seatbelts:
-            for det in no_seatbelts:
-                plate = self._extract_plate_with_hints(original_image, det["box"], plate_hints)
-                violations.append(
-                    {
-                        "type": "NO SEATBELT",
-                        "violation_type": "NO SEATBELT",
-                        "confidence": det["confidence"],
-                        "bbox": det["box"],
-                        "plate_text": plate,
-                        "timestamp": now,
-                    }
-                )
-        else:
-            for vehicle in vehicles:
-                vbox = vehicle["box"]
-                driver_region = self.get_driver_region(vbox)
-                has_seatbelt = any(
-                    self.compute_iou(driver_region, sb["bbox"]) > 0.1
-                    for sb in seatbelts
-                )
-                if not has_seatbelt:
-                    plate = self._extract_plate_with_hints(original_image, vbox, plate_hints)
-                    violations.append(
-                        {
-                            "type": "NO SEATBELT",
-                            "violation_type": "NO SEATBELT",
-                            "confidence": vehicle["confidence"],
-                            "bbox": vbox,
-                            "plate_text": plate,
-                            "timestamp": now,
-                        }
-                    )
+        # NO SEATBELT (using dedicated seatbelt model)
+        for vehicle in vehicles:
+            orig_name = vehicle.get('original_class_name', vehicle.get('class_name', ''))
+            if orig_name in ['motorcycle', 'bicycle']:
+                continue
+
+            vbox = vehicle["box"]
+            driver_region = self.get_driver_region(vbox)
+            has_seatbelt = any(
+                self.compute_iou(driver_region, sb['bbox']) > 0.1 for sb in seatbelts
+            )
+            if not has_seatbelt:
+                plate = self.extract_plate_text(original_image, vbox)
+                violations.append({
+                    "type": "NO SEATBELT",
+                    "violation_type": "NO SEATBELT",
+                    "confidence": vehicle["confidence"],
+                    "bbox": vbox,
+                    "plate_text": plate,
+                    "timestamp": now,
+                })
 
         # TRIPLE RIDING
         def count_overlapping(bbox_list, expanded_box):
@@ -950,10 +937,7 @@ def draw_violations(image, violations):
 
 
 def draw_annotations(image, violations, detections=None):
-    """
-    Draw rich bounding boxes and annotations on image with per-type colors,
-    confidence bars, labels, plate text, fine amounts, and watermark.
-    """
+    """Minimal annotation: 2px border + small label pill above each violation box."""
     if isinstance(image, str):
         annotated = cv2.imread(image)
         if annotated is None:
@@ -961,52 +945,15 @@ def draw_annotations(image, violations, detections=None):
     else:
         annotated = image.copy()
 
-    height, width = annotated.shape[:2]
-
     VIOLATION_COLORS = {
-        'NO_HELMET': (0, 0, 255),
-        'NO_SEATBELT': (0, 165, 255),
-        'TRIPLE_RIDING': (255, 0, 255),
-        'WRONG_SIDE': (255, 0, 0),
-        'STOP_LINE': (0, 255, 0),
-        'RED_LIGHT': (0, 0, 255),
-        'ILLEGAL_PARKING': (0, 255, 255),
-        'NO HELMET': (0, 0, 255),
-        'NO SEATBELT': (0, 165, 255),
-        'TRIPLE RIDING': (255, 0, 255),
-        'WRONG SIDE': (255, 0, 0),
-        'STOP LINE': (0, 255, 0),
-        'RED LIGHT': (0, 0, 255),
-        'ILLEGAL PARKING': (0, 255, 255),
+        'NO_HELMET': (0, 0, 255), 'NO HELMET': (0, 0, 255),
+        'NO_SEATBELT': (0, 165, 255), 'NO SEATBELT': (0, 165, 255),
+        'TRIPLE_RIDING': (255, 0, 255), 'TRIPLE RIDING': (255, 0, 255),
+        'WRONG_SIDE': (255, 0, 0), 'WRONG SIDE': (255, 0, 0),
+        'RED_LIGHT': (0, 0, 255), 'RED LIGHT': (0, 0, 255),
+        'STOP_LINE': (0, 255, 0), 'STOP LINE': (0, 255, 0),
+        'ILLEGAL_PARKING': (0, 255, 255), 'ILLEGAL PARKING': (0, 255, 255),
     }
-
-    DETECTION_COLORS = {
-        'vehicle': (0, 255, 255),
-        'car': (0, 255, 255),
-        'truck': (0, 255, 255),
-        'bus': (0, 255, 255),
-        'motorcycle': (0, 255, 255),
-        'person_rider': (0, 255, 0),
-        'rider': (0, 255, 0),
-        'person': (0, 255, 0),
-        'helmet': (255, 255, 0),
-        'seatbelt': (255, 0, 255),
-        'pedestrian': (255, 200, 0),
-    }
-
-    if detections:
-        for det in detections:
-            bbox = det.get('box', det.get('bbox', []))
-            if not bbox or len(bbox) < 4:
-                continue
-            x1, y1, x2, y2 = map(int, bbox[:4])
-            class_name = det.get('class_name', 'object')
-            conf = det.get('confidence', 0)
-            color = DETECTION_COLORS.get(class_name, (128, 128, 128))
-            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 1)
-            label = f"{class_name}: {conf:.2f}"
-            cv2.putText(annotated, label, (x1, y1 - 5),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
 
     for violation in violations:
         bbox = violation.get('bbox', violation.get('box', []))
@@ -1016,57 +963,25 @@ def draw_annotations(image, violations, detections=None):
         x1, y1, x2, y2 = map(int, bbox[:4])
         vtype = violation.get('type', violation.get('violation_type', 'UNKNOWN'))
         confidence = violation.get('confidence', 0)
-        plate_text = violation.get('plate_text', '')
-        fine = violation.get('fine', 0)
-
         color = VIOLATION_COLORS.get(vtype, (255, 255, 255))
 
-        cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 3)
+        cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
 
-        bar_width = int((x2 - x1) * min(confidence, 1.0))
-        if bar_width > 0:
-            cv2.rectangle(annotated, (x1, y1 - 8), (x1 + bar_width, y1), color, -1)
+        label = f"{vtype.replace('_', ' ')}: {confidence:.0%}"
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.45
+        thickness = 1
+        (text_w, text_h), baseline = cv2.getTextSize(label, font, font_scale, thickness)
+        label_y = y1 - 5
+        if label_y - text_h - 4 < 0:
+            label_y = y2 + 5
 
-        label_parts = [f"{vtype.replace('_', ' ')}"]
-        if confidence > 0:
-            label_parts.append(f"{confidence*100:.1f}%")
-        label = ' | '.join(label_parts)
-
-        (text_w, text_h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
-        label_y = y1 - 32
-        if label_y < 10:
-            label_y = y2 + 10
-
-        cv2.rectangle(annotated, (x1, label_y - text_h - 6),
-                      (x1 + text_w + 12, label_y + 4), color, -1)
-        cv2.putText(annotated, label, (x1 + 6, label_y + 4),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
-
-        if plate_text:
-            plate_label = f"Plate: {plate_text}"
-            plate_y = y2 + 22
-            (pw, ph), _ = cv2.getTextSize(plate_label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
-            cv2.rectangle(annotated, (x1, plate_y - ph - 4),
-                          (x1 + pw + 10, plate_y + 4), (0, 0, 0), -1)
-            cv2.putText(annotated, plate_label, (x1 + 5, plate_y + 4),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
-
-        if fine > 0:
-            fine_label = f"Fine: Rs.{fine}"
-            fine_y = y2 + 46
-            (fw, fh), _ = cv2.getTextSize(fine_label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
-            cv2.rectangle(annotated, (x1, fine_y - fh - 4),
-                          (x1 + fw + 10, fine_y + 4), (0, 0, 0), -1)
-            cv2.putText(annotated, fine_label, (x1 + 5, fine_y + 4),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 165, 255), 2)
-
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    cv2.putText(annotated, f"Gridlock AI | {timestamp}", (10, height - 10),
-               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
-
-    count_label = f"{len(violations)} violation(s) detected"
-    cv2.putText(annotated, count_label, (10, 30),
-               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255) if violations else (0, 255, 0), 2)
+        cv2.rectangle(annotated,
+                     (x1, label_y - text_h - 4),
+                     (x1 + text_w + 8, label_y + 2),
+                     color, -1)
+        cv2.putText(annotated, label, (x1 + 4, label_y - baseline),
+                   font, font_scale, (255, 255, 255), thickness)
 
     return annotated
 
@@ -1259,12 +1174,8 @@ def detect_violations_json(image_path, confidence_threshold=0.5, enable_preproce
                 'totalPlates': 0,
                 'validPlates': 0
             },
-            'annotated_image_path': None
+            'original_image_path': image_path
         }
-
-        if violations:
-            annotated_path, _ = generate_evidence_image(image_path, violations, detections)
-            result['annotated_image_path'] = annotated_path
 
         plate_count = 0
         valid_plate_count = 0
@@ -1298,7 +1209,7 @@ def detect_violations_json(image_path, confidence_threshold=0.5, enable_preproce
             'error': str(e),
             'violations': [],
             'stats': {'total': 0, 'byType': {}, 'avgConfidence': 0, 'totalPlates': 0, 'validPlates': 0},
-            'annotated_image_path': None
+            'original_image_path': image_path
         }
 
 

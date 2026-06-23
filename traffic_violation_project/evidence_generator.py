@@ -60,17 +60,7 @@ class EvidenceGenerator:
         os.makedirs(output_dir, exist_ok=True)
 
     def draw_annotations(self, image: np.ndarray, violations: list) -> np.ndarray:
-        """
-        Draw bounding boxes and labels for all violations on a copy of the image.
-
-        Args:
-            image: BGR numpy array
-            violations: list of violation dicts with 'bbox', 'type'/'violation_type',
-                        'confidence', and optionally 'plate_text'
-
-        Returns:
-            Annotated BGR numpy array
-        """
+        """Minimal annotation: 2px border + small label pill above each violation box."""
         annotated = image.copy()
 
         for violation in violations:
@@ -81,54 +71,26 @@ class EvidenceGenerator:
             x1, y1, x2, y2 = map(int, bbox[:4])
             vtype = violation.get('type') or violation.get('violation_type', 'UNKNOWN')
             confidence = violation.get('confidence', 0.0)
-            plate = violation.get('plate_text') or violation.get('plateText') or ''
 
             color = self.VIOLATION_COLORS.get(vtype, (255, 255, 255))
 
-            # Main bounding box (thick)
-            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 3)
+            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
 
-            # Confidence bar above the box (clamp width to box width)
-            bar_width = max(1, int((x2 - x1) * min(confidence, 1.0)))
-            cv2.rectangle(annotated, (x1, max(0, y1 - 6)), (x1 + bar_width, y1), color, -1)
-
-            # Build label lines
-            label_lines = [
-                f"{vtype.replace('_', ' ')}  {confidence * 100:.1f}%",
-            ]
-            if plate:
-                label_lines.append(f"Plate: {plate}")
-
+            label = f"{vtype.replace('_', ' ')}: {confidence:.0%}"
             font = cv2.FONT_HERSHEY_SIMPLEX
-            font_scale = 0.55
-            thickness = 2
+            font_scale = 0.45
+            thickness = 1
+            (text_w, text_h), baseline = cv2.getTextSize(label, font, font_scale, thickness)
+            label_y = y1 - 5
+            if label_y - text_h - 4 < 0:
+                label_y = y2 + 5
 
-            for i, line in enumerate(label_lines):
-                (text_w, text_h), baseline = cv2.getTextSize(line, font, font_scale, thickness)
-                # Position label above box; if not enough room, put below
-                y_text = y1 - 10 - i * (text_h + 6)
-                if y_text - text_h - baseline < 0:
-                    y_text = y2 + text_h + 6 + i * (text_h + 6)
-
-                # Background rectangle
-                cv2.rectangle(
-                    annotated,
-                    (x1, y_text - text_h - baseline - 2),
-                    (x1 + text_w + 6, y_text + 2),
-                    color,
-                    -1,
-                )
-                # White text
-                cv2.putText(
-                    annotated,
-                    line,
-                    (x1 + 3, y_text - baseline),
-                    font,
-                    font_scale,
-                    (255, 255, 255),
-                    thickness,
-                    cv2.LINE_AA,
-                )
+            cv2.rectangle(annotated,
+                         (x1, label_y - text_h - 4),
+                         (x1 + text_w + 8, label_y + 2),
+                         color, -1)
+            cv2.putText(annotated, label, (x1 + 4, label_y - baseline),
+                       font, font_scale, (255, 255, 255), thickness)
 
         return annotated
 

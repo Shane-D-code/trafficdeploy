@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import type { Violation } from '../../types';
 
 interface DetectionCanvasProps {
@@ -6,20 +6,74 @@ interface DetectionCanvasProps {
   violations: Violation[];
   annotatedImageUrl?: string | null;
   onViolationClick?: (violation: Violation) => void;
+  confidenceThreshold?: number;
 }
 
 const CLASS_COLORS: Record<string, string> = {
-  NO_HELMET: '#FF5D5D',
-  NO_SEATBELT: '#FFD43B',
-  TRIPLE_RIDING: '#A3FF3C',
-  WRONG_SIDE: '#FF5D5D',
-  RED_LIGHT: '#FF5D5D',
-  STOP_LINE: '#7BFF7B',
-  ILLEGAL_PARKING: '#FFD43B',
+  'NO HELMET': '#FF5D5D',
+  'NO_SEATBELT': '#FF00FF',
+  'TRIPLE RIDING': '#00FFFF',
+  'WRONG SIDE': '#FF5D5D',
+  'RED LIGHT': '#FF5D5D',
+  'STOP LINE': '#7BFF7B',
+  'ILLEGAL PARKING': '#FFD43B',
 };
 
-const DetectionCanvas: React.FC<DetectionCanvasProps> = ({ image, violations, annotatedImageUrl, onViolationClick }) => {
+function computeIoU(a: number[], b: number[]): number {
+  const x1 = Math.max(a[0], b[0]);
+  const y1 = Math.max(a[1], b[1]);
+  const x2 = Math.min(a[2], b[2]);
+  const y2 = Math.min(a[3], b[3]);
+  const inter = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+  const areaA = (a[2] - a[0]) * (a[3] - a[1]);
+  const areaB = (b[2] - b[0]) * (b[3] - b[1]);
+  const union = areaA + areaB - inter;
+  return union > 0 ? inter / union : 0;
+}
+
+function centerDist(a: number[], b: number[]): number {
+  const cax = (a[0] + a[2]) / 2, cay = (a[1] + a[3]) / 2;
+  const cbx = (b[0] + b[2]) / 2, cby = (b[1] + b[3]) / 2;
+  return Math.sqrt((cax - cbx) ** 2 + (cay - cby) ** 2);
+}
+
+function nmsFilter(violations: Violation[]): Violation[] {
+  const sorted = [...violations].sort((a, b) => b.confidence - a.confidence);
+  const kept: Violation[] = [];
+  for (const v of sorted) {
+    if (kept.every(k => computeIoU(v.bbox, k.bbox) <= 0.5)) kept.push(v);
+  }
+  return kept;
+}
+
+function groupViolations(violations: Violation[]): Violation[][] {
+  const groups: Violation[][] = [];
+  for (const v of violations) {
+    let added = false;
+    for (const g of groups) {
+      if (g.some(m => computeIoU(v.bbox, m.bbox) > 0.3 || centerDist(v.bbox, m.bbox) < 50)) {
+        g.push(v);
+        added = true;
+        break;
+      }
+    }
+    if (!added) groups.push([v]);
+  }
+  return groups;
+}
+
+const DetectionCanvas: React.FC<DetectionCanvasProps> = ({
+  image, violations, annotatedImageUrl, onViolationClick, confidenceThreshold = 0
+}) => {
   const [imgNatural, setImgNatural] = useState({ w: 1, h: 1 });
+  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+
+  const filtered = useMemo(() => {
+    const above = violations.filter(v => v.confidence >= confidenceThreshold);
+    return nmsFilter(above);
+  }, [violations, confidenceThreshold]);
+
+  const groups = useMemo(() => groupViolations(filtered), [filtered]);
 
   if (!image) {
     return (
@@ -50,39 +104,115 @@ const DetectionCanvas: React.FC<DetectionCanvasProps> = ({ image, violations, an
           }
         }}
       />
-      {!annotatedImageUrl && violations.map((v, i) => {
-        const [x1, y1, x2, y2] = v.bbox;
-        const color = CLASS_COLORS[v.type] || '#A3FF3C';
+
+      {!annotatedImageUrl && groups.map((group, gi) => {
+        const primary = group.reduce((a, b) => a.confidence > b.confidence ? a : b);
+        const [x1, y1, x2, y2] = primary.bbox;
+        const color = CLASS_COLORS[primary.type] || '#A3FF3C';
+        const isHovered = hoveredIdx === gi;
+        const sx = imgNatural.w || 1;
+        const sy = imgNatural.h || 1;
+
         return (
-          <div
-            key={i}
-            className="absolute cursor-pointer group hover:z-10"
-            style={{
-              left: `${(x1 / imgNatural.w) * 100}%`,
-              top: `${(y1 / imgNatural.h) * 100}%`,
-              width: `${((x2 - x1) / imgNatural.w) * 100}%`,
-              height: `${((y2 - y1) / imgNatural.h) * 100}%`,
-            }}
-            onClick={() => onViolationClick?.(v)}
-          >
-            <div className="w-full h-full absolute" style={{ border: '2px solid ' + color }} />
+          <div key={`box-${gi}`}>
             <div
-              className="absolute -top-7 left-0 px-2 py-0.5 text-[11px] font-medium font-mono whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity text-black"
-              style={{ background: color }}
+              className="absolute cursor-pointer"
+              style={{
+                left: `${(x1 / sx) * 100}%`,
+                top: `${(y1 / sy) * 100}%`,
+                width: `${((x2 - x1) / sx) * 100}%`,
+                height: `${((y2 - y1) / sy) * 100}%`,
+                zIndex: isHovered ? 20 : 10,
+                pointerEvents: 'auto',
+              }}
+              onClick={() => onViolationClick?.(primary)}
+              onMouseEnter={() => setHoveredIdx(gi)}
+              onMouseLeave={() => setHoveredIdx(null)}
             >
-              {v.type.replace('_', ' ')} ({(v.confidence * 100).toFixed(0)}%)
+              <div
+                className="absolute inset-0"
+                style={{
+                  border: `${isHovered ? 3 : 2}px solid ${color}`,
+                  backgroundColor: color + '14',
+                }}
+              />
+              {isHovered && (
+                <div
+                  className="absolute z-30 px-2 py-1 text-[10px] font-mono whitespace-nowrap rounded"
+                  style={{
+                    background: 'rgba(0,0,0,0.85)',
+                    color: '#00ff41',
+                    top: '-32px',
+                    left: '0',
+                    pointerEvents: 'none',
+                  }}
+                >
+                  {primary.type.replace('_', ' ')} · {(primary.confidence * 100).toFixed(1)}% · [{Math.round(x1)},{Math.round(y1)},{Math.round(x2)},{Math.round(y2)}]
+                </div>
+              )}
             </div>
           </div>
         );
       })}
+
+      {!annotatedImageUrl && groups.map((group, gi) => {
+        const primary = group.reduce((a, b) => a.confidence > b.confidence ? a : b);
+        const [x1, y1, x2, _y2] = primary.bbox;
+        const sx = imgNatural.w || 1;
+        const sy = imgNatural.h || 1;
+        const placeAbove = (y1 / sy) * 100 > 8;
+
+        return (
+          <div
+            key={`label-${gi}`}
+            className="absolute flex flex-col gap-0.5"
+            style={{
+              left: `${(x1 / sx) * 100}%`,
+              top: placeAbove
+                ? `${((y1 / sy) * 100) - 0.5}%`
+                : `${((_y2 / sy) * 100) + 0.5}%`,
+              transform: placeAbove ? 'translateY(-100%)' : 'translateY(0)',
+              zIndex: 15,
+              pointerEvents: 'none',
+              maxWidth: '140px',
+            }}
+          >
+            {group.map((v, vi) => (
+              <span
+                key={vi}
+                className="truncate"
+                style={{
+                  padding: '4px 8px',
+                  borderRadius: '4px',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  background: CLASS_COLORS[v.type] || '#A3FF3C',
+                  color: '#000',
+                  textOverflow: 'ellipsis',
+                  overflow: 'hidden',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {v.type.replace('_', ' ')} {(v.confidence * 100).toFixed(0)}%
+              </span>
+            ))}
+          </div>
+        );
+      })}
+
       {violations.length > 0 && (
-        <div className="absolute bottom-3 left-3 flex flex-wrap gap-1.5">
-          {Array.from(new Set(violations.map(v => v.type))).map(type => (
-            <span key={type} className="px-2 py-0.5 text-[10px] font-mono font-medium text-black"
-              style={{ background: CLASS_COLORS[type] || '#A3FF3C' }}>
-              {type.replace('_', ' ')}
-            </span>
-          ))}
+        <div
+          className="absolute top-2 left-2 rounded font-mono"
+          style={{
+            background: 'rgba(0,0,0,0.6)',
+            color: '#00ff41',
+            fontSize: '12px',
+            padding: '6px 10px',
+            zIndex: 25,
+            pointerEvents: 'none',
+          }}
+        >
+          ⚠ {violations.length} VIOLATION{violations.length !== 1 ? 'S' : ''} DETECTED
         </div>
       )}
     </div>
