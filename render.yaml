@@ -43,7 +43,7 @@ services:
       mountPath: /opt/render/project/src/data
       sizeGB: 1
 
-  - type: static
+  - type: web
     name: gridlock-frontend
     runtime: node
     plan: free
@@ -57,7 +57,7 @@ services:
       npm run build
       echo "Frontend build complete"
 
-    staticPublishPath: ./dist
+    startCommand: npx serve -s dist -l 3000
 
     envVars:
       - key: VITE_API_URL
