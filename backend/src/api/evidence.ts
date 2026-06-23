@@ -15,6 +15,12 @@ router.get('/', async (_req, res) => {
         const filename = path.basename(v.annotated_image_path);
         annotatedUrl = `/evidence/${filename}`;
       }
+      let imgUrl = '';
+      if (v.image_path) {
+        imgUrl = v.image_path.startsWith('/') ? v.image_path : `/uploads/${path.basename(v.image_path)}`;
+      } else if (v.evidence_path) {
+        imgUrl = v.evidence_path.startsWith('/') ? v.evidence_path : `/evidence/${path.basename(v.evidence_path)}`;
+      }
       return {
         id: String(v.id),
         evidenceId: v.evidence_id,
@@ -22,9 +28,10 @@ router.get('/', async (_req, res) => {
         plateText: v.plate_text || 'N/A',
         confidence: v.confidence,
         timestamp: v.timestamp,
-        imageUrl: v.evidence_path || v.image_path || '',
+        imageUrl: imgUrl,
         annotatedImageUrl: annotatedUrl,
         status: v.status || 'pending',
+        location: v.location || null,
       };
     });
     res.json({ success: true, data: items });
@@ -45,6 +52,12 @@ router.get('/:id', async (req, res) => {
       const filename = path.basename(item.annotated_image_path);
       annotatedUrl = `/evidence/${filename}`;
     }
+    let imgUrl = '';
+    if (item.image_path) {
+      imgUrl = item.image_path.startsWith('/') ? item.image_path : `/uploads/${path.basename(item.image_path)}`;
+    } else if (item.evidence_path) {
+      imgUrl = item.evidence_path.startsWith('/') ? item.evidence_path : `/evidence/${path.basename(item.evidence_path)}`;
+    }
     res.json({
       success: true,
       data: {
@@ -54,11 +67,12 @@ router.get('/:id', async (req, res) => {
         plateText: item.plate_text || 'N/A',
         confidence: item.confidence,
         timestamp: item.timestamp,
-        imageUrl: item.evidence_path || item.image_path || '',
+        imageUrl: imgUrl,
         annotatedImageUrl: annotatedUrl,
         status: item.status || 'pending',
         bbox: item.bbox,
         metadata: item.metadata,
+        location: item.location,
       },
     });
   } catch (error: any) {

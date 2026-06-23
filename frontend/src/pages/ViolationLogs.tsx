@@ -105,17 +105,19 @@ const ViolationLogs: React.FC = () => {
                     <th>Plate</th>
                     <th>Confidence</th>
                     <th>Status</th>
+                    <th>Location</th>
                     <th>Timestamp</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {violations.length === 0 ? (
-                    <tr><td colSpan={6} className="py-12 text-center text-sm" style={{ color: '#6B7280' }}>No violations found</td></tr>
+                    <tr><td colSpan={7} className="py-12 text-center text-sm" style={{ color: '#6B7280' }}>No violations found</td></tr>
                   ) : (
                     violations.map((v: ViolationRecord) => {
                       const isFP = v.status === 'false_positive';
                       const isUndoing = undoMutation.isPending && toast?.id === String(v.id);
+                      const evidenceUrl = v.evidence_path || v.image_path;
                       return (
                         <tr key={v.id} className="transition-colors" style={{ cursor: 'default', opacity: isFP ? 0.6 : 1 }}>
                           <td>
@@ -132,19 +134,29 @@ const ViolationLogs: React.FC = () => {
                               {(v.status || 'pending').toUpperCase()}
                             </span>
                           </td>
+                          <td className="text-xs font-mono" style={{ color: '#6B7280' }}>{v.location || '-'}</td>
                           <td className="text-sm font-mono" style={{ color: '#6B7280' }}>{new Date(v.timestamp).toLocaleString()}</td>
                           <td>
                             {!isFP ? (
-                              <HudButton
-                                size="sm"
-                                className="text-xs"
-                                onClick={() => fpMutation.mutate(String(v.id))}
-                                disabled={fpMutation.isPending}
-                              >
-                                {fpMutation.isPending ? (
-                                  <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" />
-                                ) : 'FP'}
-                              </HudButton>
+                              <div className="flex gap-1">
+                                {evidenceUrl && (
+                                  <a href={evidenceUrl} target="_blank" rel="noopener noreferrer"
+                                    className="text-xs font-mono px-2 py-1 rounded transition-colors"
+                                    style={{ background: 'rgba(59,130,246,0.1)', color: '#3B82F6', border: '1px solid rgba(59,130,246,0.2)' }}>
+                                    View
+                                  </a>
+                                )}
+                                <HudButton
+                                  size="sm"
+                                  className="text-xs"
+                                  onClick={() => fpMutation.mutate(String(v.id))}
+                                  disabled={fpMutation.isPending}
+                                >
+                                  {fpMutation.isPending ? (
+                                    <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" />
+                                  ) : 'FP'}
+                                </HudButton>
+                              </div>
                             ) : (
                               <span className="text-xs font-mono" style={{ color: '#6B7280' }}>—</span>
                             )}

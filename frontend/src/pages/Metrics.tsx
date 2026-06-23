@@ -1,10 +1,11 @@
-import React from 'react';
-import { useQuery } from '@tanstack/react-query';
+import React, { useEffect } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, Cell } from 'recharts';
 import { analyticsApi } from '../api/analytics';
 import { HudCard } from '../components/common/HudCard';
 import { HudSpinner } from '../components/common/HudSpinner';
 import { NEON_COLORS } from '../utils/constants';
+import { wsClient } from '../api/websocket';
 import type { MetricsData } from '../types';
 
 const CustomTooltip = ({ active, payload, label }: any) => {
@@ -21,8 +22,9 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   return null;
 };
 
-const Gauge: React.FC<{ value: number; label: string; max?: number; color?: string }> = ({ value, label, max = 100, color = '#A3FF3C' }) => {
-  const pct = Math.min(value / max, 1);
+const Gauge: React.FC<{ value: number | null | undefined; label: string; max?: number; color?: string }> = ({ value, label, max = 100, color = '#A3FF3C' }) => {
+  const safeValue = value ?? 0;
+  const pct = Math.min(safeValue / max, 1);
   const degrees = pct * 180;
   return (
     <div className="flex flex-col items-center">
@@ -31,7 +33,7 @@ const Gauge: React.FC<{ value: number; label: string; max?: number; color?: stri
         <path d="M 10 90 A 60 60 0 0 1 130 90" fill="none" stroke={color} strokeWidth="12" strokeLinecap="round"
           strokeDasharray={`${(degrees / 180) * 188.5} 188.5`} />
         <text x="70" y="70" textAnchor="middle" fill={color} fontSize="22" fontFamily="IBM Plex Mono" fontWeight="bold">
-          {value.toFixed(1)}%
+          {safeValue.toFixed(1)}%
         </text>
       </svg>
       <span className="text-xs font-mono mt-1" style={{ color: '#6B7280' }}>{label}</span>
@@ -40,13 +42,32 @@ const Gauge: React.FC<{ value: number; label: string; max?: number; color?: stri
 };
 
 const Metrics: React.FC = () => {
-  const { data, isLoading } = useQuery({
+  const queryClient = useQueryClient();
+
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ['analytics-metrics'],
     queryFn: () => analyticsApi.getMetrics(),
-    refetchInterval: 30000,
+    refetchInterval: 10000,
+    retry: 3,
+    staleTime: 3000,
   });
 
+  useEffect(() => {
+    const unsub = wsClient.onMessage((message) => {
+      if (message.type === 'NEW_VIOLATION') {
+        queryClient.invalidateQueries({ queryKey: ['analytics-metrics'] });
+      }
+    });
+    return unsub;
+  }, [queryClient]);
+
   if (isLoading) return <HudSpinner size="lg" text="Loading metrics" />;
+  if (isError) return (
+    <div className="text-center py-10" style={{ color: '#FF5D5D' }}>
+      <p className="font-mono text-sm">Failed to load metrics</p>
+      <p className="text-xs mt-1 font-mono" style={{ color: '#6B7280' }}>{(error as any)?.message || 'Check server connection'}</p>
+    </div>
+  );
 
   const m = data?.data?.data as MetricsData | undefined;
   if (!m) return <p className="text-center" style={{ color: '#6B7280', padding: '4rem 0' }}>No metrics available</p>;
@@ -81,6 +102,17 @@ const Metrics: React.FC = () => {
           <p className="hud-label mt-1">Avg Confidence</p>
         </div>
       </div>
+
+      {m.totalSamples > 0 && !m.accuracy && !m.mAP && !m.precision && (
+        <div className="p-4 text-center" style={{ background: 'rgba(255,212,59,0.05)', border: '1px solid rgba(255,212,59,0.2)' }}>
+          <p className="text-sm font-mono" style={{ color: '#FFD43B' }}>
+            Metrics computation needs backend restart to use detection confidence as fallback
+          </p>
+          <p className="text-xs mt-1 font-mono" style={{ color: '#6B7280' }}>
+            {m.totalSamples} samples recorded, but accuracy/precision/mAP require reviewed violations or server-side fix
+          </p>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <HudCard title="mAP (Mean Average Precision)" accent>

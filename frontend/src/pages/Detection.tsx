@@ -358,7 +358,7 @@ const Detection: React.FC = () => {
         </div>
 
         <div className="lg:col-span-1">
-          <DetectionPanel violation={selectedViolation} violations={violations} />
+          <DetectionPanel violation={selectedViolation} violations={violations} image={preview} annotatedImageUrl={annotatedImageUrl} />
         </div>
       </div>
     </>

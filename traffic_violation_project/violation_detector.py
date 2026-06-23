@@ -1167,6 +1167,7 @@ def detect_violations_json(image_path, confidence_threshold=0.5, enable_preproce
         )
         result = {
             'violations': [],
+            'detections': detections,
             'stats': {
                 'total': len(violations),
                 'byType': {},
@@ -1180,25 +1181,50 @@ def detect_violations_json(image_path, confidence_threshold=0.5, enable_preproce
         plate_count = 0
         valid_plate_count = 0
         total_confidence = 0
+
+        # Generate annotated evidence image
+        annotated_path = None
+        try:
+            from pathlib import Path
+            annotated_img = draw_annotations(image_path, violations, detections)
+            if annotated_img is not None:
+                now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+                evidence_dir = Path("evidence")
+                evidence_dir.mkdir(parents=True, exist_ok=True)
+                import random
+                suffix = ''.join(random.choices('abcdef0123456789', k=6))
+                filename = f"violation_{now_str}_{suffix}.jpg"
+                annotated_path = str(evidence_dir / filename)
+                cv2.imwrite(annotated_path, annotated_img)
+                logger.info("Annotated evidence saved: %s", annotated_path)
+        except Exception as ev:
+            logger.error("Failed to generate annotated evidence: %s", ev)
+
+        if annotated_path:
+            result['annotated_image_path'] = annotated_path
+
         for v in violations:
-            violation = {
-                'id': str(datetime.now().timestamp()) + str(len(result['violations'])),
-                'type': v.get('type', 'UNKNOWN'),
-                'confidence': v.get('confidence', 0.0),
-                'bbox': v.get('bbox', [0, 0, 0, 0]),
-                'timestamp': v.get('timestamp', datetime.now().isoformat())
-            }
+            violation = dict(v)
+            violation['id'] = str(datetime.now().timestamp()) + str(len(result['violations']))
+
+            # Pass through all original fields
+            for key in ('type', 'confidence', 'bbox', 'timestamp',
+                        'plate_text', 'plate_confidence', 'plate_valid',
+                        'violation_type', 'source', 'explanation', 'rider_count',
+                        'ocr_confidence', 'detection_confidence'):
+                if key not in violation and key in v:
+                    violation[key] = v[key]
+
             if v.get('plate_text'):
-                violation['plateText'] = v['plate_text']
-                violation['plateConfidence'] = v.get('plate_confidence', v.get('ocr_confidence', 0.0))
-                violation['plateValid'] = v.get('plate_valid', False)
                 plate_count += 1
                 if v.get('plate_valid', False):
                     valid_plate_count += 1
+
             result['violations'].append(violation)
             vtype = v.get('type', 'UNKNOWN')
             result['stats']['byType'][vtype] = result['stats']['byType'].get(vtype, 0) + 1
             total_confidence += v.get('confidence', 0.0)
+
         if result['stats']['total'] > 0:
             result['stats']['avgConfidence'] = total_confidence / result['stats']['total']
         result['stats']['totalPlates'] = plate_count

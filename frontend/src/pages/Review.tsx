@@ -61,7 +61,11 @@ const Review: React.FC = () => {
     }
   }, [filter, selected]);
 
-  useEffect(() => { fetchIncidents(); }, [filter]);
+  useEffect(() => {
+    fetchIncidents();
+    const interval = setInterval(fetchIncidents, 15000);
+    return () => clearInterval(interval);
+  }, [filter, fetchIncidents]);
 
   const handleApprove = async () => {
     if (!selected || isSubmitting) return;
@@ -202,9 +206,9 @@ const Review: React.FC = () => {
                             )}
                           </div>
                           <div className="w-12 h-12 rounded-lg overflow-hidden shrink-0 ml-2 bg-[#1a1a2e]">
-                            {inc.summary.evidence_path ? (
+                            {(inc.summary.evidence_path || inc.summary.image_path) ? (
                               <img
-                                src={inc.summary.evidence_path}
+                                src={inc.summary.evidence_path || inc.summary.image_path}
                                 alt="Evidence"
                                 className="w-full h-full object-cover"
                                 onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
@@ -228,9 +232,9 @@ const Review: React.FC = () => {
             {selected ? (
               <div className="space-y-4 h-full flex flex-col">
                 <div className="relative rounded-lg overflow-hidden shrink-0 bg-[#0B0F13] border border-[rgba(58,67,79,0.2)]">
-                  {selected.summary.evidence_path ? (
+                  {(selected.summary.evidence_path || selected.summary.image_path) ? (
                     <img
-                      src={selected.summary.evidence_path}
+                      src={selected.summary.evidence_path || selected.summary.image_path}
                       alt="Annotated evidence"
                       className="w-full h-64 object-contain"
                     />

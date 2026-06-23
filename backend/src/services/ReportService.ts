@@ -12,8 +12,12 @@ export class ReportService {
     const stats = await this.db.getStats();
 
     let filtered = violations;
-    if (params.startDate) filtered = filtered.filter(v => v.timestamp >= params.startDate!);
-    if (params.endDate) filtered = filtered.filter(v => v.timestamp <= params.endDate!);
+    if (params.startDate) filtered = filtered.filter(v => v.timestamp && new Date(v.timestamp) >= new Date(params.startDate!));
+    if (params.endDate) {
+      const end = new Date(params.endDate!);
+      end.setHours(23, 59, 59, 999);
+      filtered = filtered.filter(v => v.timestamp && new Date(v.timestamp) <= end);
+    }
     if (params.types && params.types.length > 0) filtered = filtered.filter(v => params.types!.includes(v.violation_type));
 
     return {
@@ -30,7 +34,9 @@ export class ReportService {
         type: v.violation_type,
         plateText: v.plate_text,
         confidence: v.confidence,
-        timestamp: v.timestamp
+        timestamp: v.timestamp,
+        location: v.location,
+        evidence_path: v.evidence_path
       }))
     };
   }

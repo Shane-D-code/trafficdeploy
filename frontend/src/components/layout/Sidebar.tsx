@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { Home, Camera, Upload, Activity, FileText, BarChart, Database, Settings, ChevronLeft, Shield, MapPin, Gauge } from 'lucide-react';
+import { Home, Upload, Activity, FileText, BarChart, Database, Settings, ChevronLeft, Shield, MapPin, Gauge } from 'lucide-react';
 
 interface SidebarProps {
   collapsed: boolean;
@@ -9,7 +9,6 @@ interface SidebarProps {
 
 const menuItems = [
   { path: '/', icon: Home, label: 'Dashboard', id: 'DASH' },
-  { path: '/live', icon: Camera, label: 'Live Camera', id: 'CAM' },
   { path: '/detection', icon: Upload, label: 'Upload Image', id: 'UPL' },
   { path: '/logs', icon: Activity, label: 'Violation Logs', id: 'LOG' },
   { path: '/reports', icon: FileText, label: 'Reports', id: 'RPT' },

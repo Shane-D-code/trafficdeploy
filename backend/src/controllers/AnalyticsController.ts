@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import path from 'path';
 import { DatabaseService } from '../services/DatabaseService';
 
 const db = new DatabaseService();
@@ -14,12 +15,13 @@ export const getStats = async (_req: Request, res: Response): Promise<void> => {
 
 export const getViolations = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { type, plate, startDate, endDate, page, limit } = req.query;
+    const { type, plate, startDate, endDate, page, limit, status } = req.query;
     const result = await db.searchViolations({
       type: type as string,
       plate: plate as string,
       startDate: startDate as string,
       endDate: endDate as string,
+      status: status as string,
       page: page ? parseInt(page as string) : 1,
       limit: limit ? parseInt(limit as string) : 50
     });
@@ -137,7 +139,7 @@ export const getIncidents = async (req: Request, res: Response): Promise<void> =
             timestamp: v.timestamp || '',
             license_plate: v.plate_text || '',
             image_path: v.image_path || '',
-            evidence_path: v.annotated_image_path || v.evidence_path || '',
+            evidence_path: v.annotated_image_path ? `/evidence/${path.basename(v.annotated_image_path)}` : (v.evidence_path || v.image_path || ''),
             status: v.status || 'pending',
           },
           violations: [],
@@ -155,8 +157,8 @@ export const getIncidents = async (req: Request, res: Response): Promise<void> =
       }
       if (v.plate_text) incident.summary.license_plate = v.plate_text;
       if (v.image_path) incident.summary.image_path = v.image_path;
-      if (v.annotated_image_path || v.evidence_path) {
-        incident.summary.evidence_path = (v.annotated_image_path || v.evidence_path) || '';
+      if (v.annotated_image_path || v.evidence_path || v.image_path) {
+        incident.summary.evidence_path = v.annotated_image_path ? `/evidence/${path.basename(v.annotated_image_path)}` : (v.evidence_path || v.image_path || '');
       }
       if (v.status) {
         if (v.status === 'rejected' || v.status === 'false_positive') incident.canApprove = false;

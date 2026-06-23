@@ -1,13 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { HudCard } from '../components/common/HudCard';
 import { HudButton } from '../components/common/HudButton';
 import { ImageIcon } from 'lucide-react';
 import type { EvidenceItem } from '../types';
 
+const STATUS_COLORS: Record<string, string> = {
+  pending: '#FFD43B',
+  approved: '#3CE0A3',
+  rejected: '#FF5D5D',
+  false_positive: '#FF9F43',
+};
+
 const Evidence: React.FC = () => {
   const [selected, setSelected] = useState<EvidenceItem | null>(null);
   const [showAnnotated, setShowAnnotated] = useState(true);
+  const [fullDetails, setFullDetails] = useState<any>(null);
 
   const { data: evidenceData, isLoading } = useQuery({
     queryKey: ['evidence'],
@@ -16,6 +24,21 @@ const Evidence: React.FC = () => {
   });
 
   const items: EvidenceItem[] = evidenceData?.data || [];
+
+  const parseMetadata = (meta: string | undefined) => {
+    if (!meta) return null;
+    try { return JSON.parse(meta); } catch { return null; }
+  };
+
+  useEffect(() => {
+    if (selected) {
+      setFullDetails(null);
+      fetch(`/api/evidence/${selected.id}`)
+        .then(r => r.json())
+        .then(res => setFullDetails(res.data))
+        .catch(() => {});
+    }
+  }, [selected]);
 
   if (isLoading) {
     return (
@@ -58,7 +81,18 @@ const Evidence: React.FC = () => {
                       <ImageIcon className="w-8 h-8" style={{ color: '#3A434F' }} />
                     )}
                   </div>
-                  <p className="text-xs font-semibold" style={{ color: '#FF5D5D' }}>{item.violationType?.replace('_', ' ') || 'UNKNOWN'}</p>
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-xs font-semibold" style={{ color: '#FF5D5D' }}>{item.violationType?.replace('_', ' ') || 'UNKNOWN'}</p>
+                    {item.status && (
+                      <span className="text-[9px] font-mono px-1 py-0.5 rounded" style={{
+                        background: `${STATUS_COLORS[item.status] || '#6B7280'}20`,
+                        color: STATUS_COLORS[item.status] || '#6B7280',
+                        border: `1px solid ${STATUS_COLORS[item.status] || '#6B7280'}40`,
+                      }}>
+                        {item.status.replace('_', ' ')}
+                      </span>
+                    )}
+                  </div>
                   <p className="text-xs text-[#6B7280] font-mono mt-0.5">{item.plateText || 'N/A'}</p>
                   <div className="flex items-center justify-between mt-2">
                     <span className="text-xs font-mono" style={{ color: '#A3FF3C' }}>
@@ -114,6 +148,18 @@ const Evidence: React.FC = () => {
                       </HudButton>
                     </div>
                   )}
+                  {selected.status && (
+                    <div className="absolute top-2 left-2">
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded" style={{
+                        background: `${STATUS_COLORS[selected.status] || '#6B7280'}30`,
+                        color: STATUS_COLORS[selected.status] || '#6B7280',
+                        border: `1px solid ${STATUS_COLORS[selected.status] || '#6B7280'}60`,
+                        backdropFilter: 'blur(4px)',
+                      }}>
+                        {selected.status.replace('_', ' ').toUpperCase()}
+                      </span>
+                    </div>
+                  )}
                 </div>
                 <div className="space-y-2">
                   {[
@@ -121,6 +167,8 @@ const Evidence: React.FC = () => {
                     ['Plate', selected.plateText || 'N/A'],
                     ['Confidence', selected.confidence ? `${(selected.confidence * 100).toFixed(0)}%` : 'N/A'],
                     ['Date', selected.timestamp ? new Date(selected.timestamp).toLocaleString() : ''],
+                    ['Evidence ID', selected.evidenceId || 'N/A'],
+                    ['Location', selected.location || 'N/A'],
                   ].map(([label, value]) => (
                     <div key={label} className="flex justify-between py-2 px-3" style={{ background: '#0B0F13', border: '1px solid rgba(58,67,79,0.2)' }}>
                       <span className="hud-label">{label}</span>
@@ -128,6 +176,34 @@ const Evidence: React.FC = () => {
                     </div>
                   ))}
                 </div>
+                {fullDetails?.bbox && (
+                  <div className="py-2 px-3" style={{ background: '#0B0F13', border: '1px solid rgba(58,67,79,0.2)' }}>
+                    <span className="hud-label block mb-1">Bounding Box</span>
+                    <span className="text-xs font-mono" style={{ color: '#6B7280' }}>{fullDetails.bbox}</span>
+                  </div>
+                )}
+                {(() => {
+                  const meta = parseMetadata(fullDetails?.metadata);
+                  if (!meta) return null;
+                  const rows: [string, string][] = [];
+                  if (meta.inference_time_ms) rows.push(['Inference Time', `${meta.inference_time_ms}ms`]);
+                  if (meta.source) rows.push(['Source', meta.source]);
+                  if (meta.explanation) rows.push(['Explanation', meta.explanation]);
+                  if (meta.rider_count !== undefined) rows.push(['Rider Count', String(meta.rider_count)]);
+                  if (meta.detection_confidence) rows.push(['Detection Conf.', `${(meta.detection_confidence * 100).toFixed(0)}%`]);
+                  if (meta.ocr_confidence) rows.push(['OCR Conf.', `${(meta.ocr_confidence * 100).toFixed(0)}%`]);
+                  if (rows.length === 0) return null;
+                  return (
+                    <div className="space-y-2">
+                      {rows.map(([label, value]) => (
+                        <div key={label} className="flex justify-between py-2 px-3" style={{ background: '#0B0F13', border: '1px solid rgba(58,67,79,0.2)' }}>
+                          <span className="hud-label">{label}</span>
+                          <span className="text-xs text-[#EAEAEA] font-medium">{value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
             ) : (
               <div className="text-center py-10" style={{ color: '#6B7280' }}>

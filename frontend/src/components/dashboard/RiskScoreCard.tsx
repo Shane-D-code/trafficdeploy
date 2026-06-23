@@ -16,43 +16,20 @@ export const RiskScoreCard: React.FC = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const response = await fetch('/api/analytics/violations?limit=100');
+        const response = await fetch('/api/insights/repeat-offenders');
         if (response.ok) {
-          const data = await response.json();
-          const rows: any[] = data.data?.rows || [];
-
-          const plateMap = new Map<string, { count: number; recent: number; last: string }>();
-          const now = Date.now();
-          const thirtyDays = 30 * 24 * 60 * 60 * 1000;
-
-          for (const v of rows) {
-            const plate = v.plate_text;
-            if (!plate || plate === 'N/A') continue;
-
-            const existing = plateMap.get(plate) || { count: 0, recent: 0, last: '' };
-            existing.count += 1;
-
-            const ts = new Date(v.timestamp).getTime();
-            if (now - ts < thirtyDays) existing.recent += 1;
-            if (ts > new Date(existing.last || 0).getTime()) existing.last = v.timestamp;
-
-            plateMap.set(plate, existing);
-          }
-
-          const riskData: RiskData[] = Array.from(plateMap.entries())
-            .filter(([_, d]) => d.count >= 3)
-            .map(([plate, d]) => ({
-              plate,
-              violation_count: d.count,
-              risk_score: Math.min(100, d.count * 8 + d.recent * 5),
-              risk_level: d.count >= 8 ? 'F' : d.count >= 6 ? 'D' : d.count >= 4 ? 'C' : 'B',
-              recent_violations: d.recent,
-              last_violation: d.last,
+          const body = await response.json();
+          const items: any[] = body.data || [];
+          setOffenders(
+            items.slice(0, 5).map((o: any) => ({
+              plate: o.plate,
+              violation_count: o.count,
+              risk_score: o.riskScore || 0,
+              risk_level: o.riskLevel || 'low',
+              recent_violations: o.count,
+              last_violation: o.lastViolation || '',
             }))
-            .sort((a, b) => b.risk_score - a.risk_score)
-            .slice(0, 5);
-
-          setOffenders(riskData);
+          );
         }
       } catch {
         console.error('Failed to load risk data');
@@ -66,11 +43,11 @@ export const RiskScoreCard: React.FC = () => {
 
   const getLevelColor = (level: string) => {
     switch (level) {
-      case 'F': return 'text-red-500';
-      case 'D': return 'text-orange-500';
-      case 'C': return 'text-yellow-500';
-      case 'B': return 'text-blue-500';
-      default: return 'text-green-500';
+      case 'high': return 'text-red-500';
+      case 'critical': return 'text-red-500';
+      case 'medium': return 'text-yellow-500';
+      case 'low': return 'text-green-500';
+      default: return 'text-gray-500';
     }
   };
 
@@ -105,7 +82,7 @@ export const RiskScoreCard: React.FC = () => {
             </div>
             <div className="text-right">
               <p className={`text-lg font-bold font-mono ${getLevelColor(item.risk_level)}`}>
-                {item.risk_level}
+                {item.risk_level.toUpperCase()}
               </p>
               <p className="text-xs text-gray-500">Risk {item.risk_score.toFixed(0)}</p>
             </div>

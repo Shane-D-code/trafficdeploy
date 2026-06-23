@@ -10,6 +10,13 @@ export interface Violation {
   vehicleType?: string;
   detectionDetails?: string;
   imageUrl?: string;
+  annotated_image_url?: string;
+  source?: string;
+  explanation?: string;
+  rider_count?: number;
+  violation_type?: string;
+  detection_confidence?: number;
+  ocr_confidence?: number;
 }
 
 export interface DetectionResult {
@@ -67,6 +74,7 @@ export interface ViolationRecord {
   image_path?: string;
   bbox?: string;
   metadata?: string;
+  location?: string;
 }
 
 export interface ReportData {
@@ -84,6 +92,8 @@ export interface ReportData {
     plateText: string | null;
     confidence: number;
     timestamp: string;
+    location?: string;
+    evidence_path?: string;
   }>;
 }
 
@@ -106,6 +116,9 @@ export interface EvidenceItem {
   annotatedImageUrl?: string;
   confidence: number;
   status?: string;
+  bbox?: string;
+  metadata?: string;
+  location?: string;
 }
 
 export interface ReviewItem {

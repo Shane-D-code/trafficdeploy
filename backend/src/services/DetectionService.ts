@@ -67,7 +67,13 @@ export class DetectionService extends EventEmitter {
 
       const originalImageUrl = `/uploads/${path.basename(imagePath)}`;
 
-      jobEntry.result = { ...result, annotated_image_url: originalImageUrl, original_image_url: originalImageUrl };
+      // Use annotated image path from Python result, fall back to original
+      const annotatedImagePath = result.annotated_image_path || null;
+      const annotatedImageUrl = annotatedImagePath
+        ? `/evidence/${path.basename(annotatedImagePath)}`
+        : originalImageUrl;
+
+      jobEntry.result = { ...result, annotated_image_url: annotatedImageUrl, original_image_url: originalImageUrl };
       this.jobs.set(jobId, jobEntry);
       await this.db.updateJob(jobEntry).catch(e => console.error('Failed to update job:', e));
 
@@ -77,11 +83,19 @@ export class DetectionService extends EventEmitter {
         : inferenceTimeMs;
       for (const violation of result.violations) {
         try {
-          const meta = JSON.stringify({ inference_time_ms: perViolationMs });
+          const metaObj: any = { inference_time_ms: perViolationMs };
+          // Preserve all metadata from Python pipeline (source, explanation, rider_count, etc.)
+          if (violation.source) metaObj.source = violation.source;
+          if (violation.explanation) metaObj.explanation = violation.explanation;
+          if (violation.rider_count) metaObj.rider_count = violation.rider_count;
+          if (violation.plate_confidence) metaObj.plate_confidence = violation.plate_confidence;
+          const meta = JSON.stringify(metaObj);
           await this.db.saveViolation({
             ...violation,
             job_id: jobId,
             image_path: originalImageUrl,
+            annotated_image_path: annotatedImagePath,
+            evidence_path: annotatedImagePath,
             metadata: meta
           });
           savedCount++;
@@ -144,14 +158,22 @@ export class DetectionService extends EventEmitter {
       const originalImageUrl = `/uploads/${path.basename(videoPath)}`;
       const violationCount = result.violations?.length || 1;
       const perViolationMs = Math.round(inferenceTimeMs / violationCount);
+      const annotatedImagePath = result.annotated_image_path || null;
       if (result.violations) {
         for (const violation of result.violations) {
           try {
-            const meta = JSON.stringify({ inference_time_ms: perViolationMs });
+            const metaObj: any = { inference_time_ms: perViolationMs };
+            if (violation.source) metaObj.source = violation.source;
+            if (violation.explanation) metaObj.explanation = violation.explanation;
+            if (violation.rider_count) metaObj.rider_count = violation.rider_count;
+            if (violation.plate_confidence) metaObj.plate_confidence = violation.plate_confidence;
+            const meta = JSON.stringify(metaObj);
             await this.db.saveViolation({
               ...violation,
               job_id: jobId,
               image_path: originalImageUrl,
+              annotated_image_path: annotatedImagePath,
+              evidence_path: annotatedImagePath,
               metadata: meta
             });
             savedCount++;

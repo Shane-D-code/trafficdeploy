@@ -7,6 +7,11 @@ export interface Violation {
   plateConfidence?: number;
   plateValid?: boolean;
   timestamp: string;
+  source?: string;
+  explanation?: string;
+  rider_count?: number;
+  violation_type?: string;
+  annotated_image_path?: string;
 }
 
 export interface DetectionResult {
