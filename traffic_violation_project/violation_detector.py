@@ -171,53 +171,57 @@ class ViolationDetector:
             logger.warning("Failed to load enhanced models: %s", e)
             self.use_enhanced_models = False
 
-    def _merge_detections(self, base_detections, specialized_detections, merge_classes):
-        """Merge specialized model detections into base detections, preferring
-        the specialized model's prediction for overlapping boxes of merge_classes."""
-        merged = list(base_detections)
-        for sd in specialized_detections:
-            cls = sd["class_name"]
-            if cls not in merge_classes:
-                continue
-            # Check overlap with existing merged detections of same class
-            is_duplicate = False
-            for md in merged:
-                if md["class_name"] == cls and self.compute_iou(sd["box"], md["box"]) > self.iou_threshold:
-                    if sd["confidence"] > md["confidence"]:
-                        md.update(sd)
-                    is_duplicate = True
-                    break
-            if not is_duplicate:
-                merged.append(sd)
-        return merged
+    def _run_helmet_model(self, image, confidence_threshold):
+        """Run the specialized helmet model. Returns helmet_model_detections (driver/passenger
+        with/without labels), and a set of no_helmet, helmet, rider, vehicle detections mapped
+        to standard class names."""
+        if self.helmet_model is None:
+            return [], [], [], [], []
+
+        helmet_raw = []
+        no_helmet_raw = []
+        riders_extra = []
+        vehicles_extra = []
+
+        try:
+            hr = self.helmet_model(image, conf=confidence_threshold, verbose=False)
+            if hr and len(hr) > 0:
+                hb = hr[0].boxes
+                if hb is not None and len(hb) > 0:
+                    for box, conf, cls_id in zip(
+                        hb.xyxy.cpu().numpy(),
+                        hb.conf.cpu().numpy(),
+                        hb.cls.cpu().numpy().astype(int),
+                    ):
+                        entry = {
+                            "box": box.tolist(),
+                            "bbox": box.tolist(),
+                            "confidence": float(conf),
+                            "class_id": int(cls_id),
+                            "source": "helmet_model",
+                        }
+                        if cls_id in (0, 3):  # driver_with_helmet, passenger_with_helmet
+                            entry["class_name"] = "helmet"
+                            helmet_raw.append(entry)
+                        elif cls_id in (4, 5):  # driver_without_helmet, passenger_without_helmet
+                            entry["class_name"] = "no_helmet"
+                            no_helmet_raw.append(entry)
+                        elif cls_id == 1:  # bike
+                            entry["class_name"] = "vehicle"
+                            vehicles_extra.append(entry)
+                        elif cls_id == 2:  # driver
+                            entry["class_name"] = "rider"
+                            riders_extra.append(entry)
+        except Exception as e:
+            logger.warning("Helmet model inference error: %s", e)
+
+        return helmet_raw, no_helmet_raw, riders_extra, vehicles_extra
 
     def _run_ensemble_models(self, image, confidence_threshold):
-        """Run all specialized models and merge their detections with base model output."""
+        """Run seatbelt and redsignal specialized models. Helmet model is handled separately
+        in detect_violations for proper prioritization."""
         all_detections = []
-
-        # Run helmet model
-        if self.helmet_model is not None:
-            try:
-                hr = self.helmet_model(image, conf=confidence_threshold, verbose=False)
-                if hr and len(hr) > 0:
-                    hb = hr[0].boxes
-                    if hb is not None and len(hb) > 0:
-                        for box, conf, cls_id in zip(
-                            hb.xyxy.cpu().numpy(),
-                            hb.conf.cpu().numpy(),
-                            hb.cls.cpu().numpy().astype(int),
-                        ):
-                            mapped = HELMET_CLASS_MAP.get(int(cls_id))
-                            if mapped:
-                                all_detections.append({
-                                    "box": box.tolist(),
-                                    "bbox": box.tolist(),
-                                    "confidence": float(conf),
-                                    "class_name": mapped,
-                                    "source": "helmet_model",
-                                })
-            except Exception as e:
-                logger.warning("Helmet model inference error: %s", e)
+        redsignal_violations = []
 
         # Run seatbelt model
         if self.seatbelt_model is not None:
@@ -244,7 +248,6 @@ class ViolationDetector:
                 logger.warning("Seatbelt model inference error: %s", e)
 
         # Run red signal / wrong side model
-        redsignal_violations = []
         if self.redsignal_model is not None:
             try:
                 rr = self.redsignal_model(image, conf=confidence_threshold, verbose=False)
@@ -257,7 +260,6 @@ class ViolationDetector:
                             rb.cls.cpu().numpy().astype(int),
                         ):
                             mapped = REDSIGNAL_CLASS_MAP.get(int(cls_id))
-                            # License plate detections feed into plate recognizer later
                             if mapped == "license_plate":
                                 all_detections.append({
                                     "box": box.tolist(),
@@ -402,13 +404,30 @@ class ViolationDetector:
                     }
                 )
 
-        # Run specialized ensemble models on the preprocessed image
+        # Run specialized ensemble models
+        # Helmet model is PRIMARY authority for helmet/no_helmet detection
+        h_helmet, h_no_helmet, h_riders, h_vehicles = self._run_helmet_model(proc_image, confidence_threshold)
         specialized_dets, ml_violations = self._run_ensemble_models(proc_image, confidence_threshold)
 
-        # Merge specialized detections: helmet/no_helmet, seatbelt/no_seatbelt, vehicle, rider
-        detections = self._merge_detections(
-            detections, specialized_dets, ["helmet", "no_helmet", "seatbelt", "no_seatbelt", "vehicle", "rider"]
-        )
+        # Strip base model helmet/no_helmet detections that overlap with helmet model predictions
+        helmet_model_boxes = [d["box"] for d in h_helmet + h_no_helmet]
+        filtered = []
+        for d in detections:
+            cls = d["class_name"]
+            if cls in ("helmet", "no_helmet"):
+                is_overlapping = any(self.compute_iou(d["box"], hb) > self.iou_threshold for hb in helmet_model_boxes)
+                if is_overlapping:
+                    continue
+            filtered.append(d)
+        detections = filtered
+
+        # Add helmet model's rider/vehicle detections to enrich detection pool
+        for d in h_riders + h_vehicles:
+            detections.append(d)
+
+        # Add seatbelt/plate specialized detections
+        for sd in specialized_dets:
+            detections.append(sd)
 
         riders = [
             d for d in detections if d["class_name"] == "rider"
@@ -418,11 +437,21 @@ class ViolationDetector:
             for d in detections
             if d["class_name"] in ["vehicle", "car", "truck", "bus", "motorcycle"]
         ]
-        helmets = [d for d in detections if d["class_name"] == "helmet"]
+
+        # Use helmet model detections as PRIMARY source for helmet/no_helmet
+        # These already represent validated people (driver/passenger), no _is_head_region needed
+        helmets = list(h_helmet)
+        no_helmets = list(h_no_helmet)
+
+        # Also include any remaining base-model helmet/no_helmet not overlapping helmet model
+        for d in filtered:
+            cls = d["class_name"]
+            if cls == "helmet":
+                helmets.append(d)
+            elif cls in ("no_helmet", "without_helmet"):
+                no_helmets.append(d)
+
         seatbelts = [d for d in detections if d["class_name"] == "seatbelt"]
-        no_helmets = [
-            d for d in detections if d["class_name"] in ["no_helmet", "without_helmet"]
-        ]
         no_seatbelts = [
             d
             for d in detections
@@ -444,10 +473,13 @@ class ViolationDetector:
                 rider_vehicle_map[ri] = best_vbox
 
         # NO HELMET — with head-region validation to reject bags/objects
+        # Helmet model detections (driver_without_helmet, passenger_without_helmet)
+        # already validate actual people — skip head-region filter for them
         if no_helmets:
             img_h_px = original_image.shape[0]
             for det in no_helmets:
-                if not self._is_head_region(det["box"], riders, img_h_px):
+                is_helmet_model = det.get("source") == "helmet_model"
+                if not is_helmet_model and not self._is_head_region(det["box"], riders, img_h_px):
                     logger.warning(
                         "[FILTER] Rejected no_helmet at %s (conf=%.2f) — not a head region",
                         det["box"], det["confidence"],
@@ -473,6 +505,7 @@ class ViolationDetector:
                         "bbox": det["box"],
                         "plate_text": plate,
                         "timestamp": now,
+                        "source": det.get("source", "base_model"),
                     }
                 )
         else:
