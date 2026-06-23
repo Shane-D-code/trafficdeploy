@@ -147,6 +147,14 @@ class ViolationDetector:
         self.explanation_engine = ExplanationEngine()
         self.evidence_generator = EvidenceGenerator()
         self.vehicle_classifier = VehicleClassifier(model_path)
+        # Per-model confidence thresholds (tuned for optimal detection)
+        self.conf_thresholds = {
+            "base": 0.25,        # Lower threshold — catch everything, let specialized models refine
+            "helmet": 0.35,      # Specialized helmet model — high precision
+            "seatbelt": 0.30,    # Seatbelts are small — moderate threshold
+            "redsignal": 0.30,   # ML violations — moderate threshold
+            "plate": 0.40,       # License plate detection — high precision
+        }
         self.use_enhanced_models = use_enhanced_models
         self.enhanced_pipeline = None
 
@@ -217,69 +225,84 @@ class ViolationDetector:
 
         return helmet_raw, no_helmet_raw, riders_extra, vehicles_extra
 
-    def _run_ensemble_models(self, image, confidence_threshold):
-        """Run seatbelt and redsignal specialized models. Helmet model is handled separately
-        in detect_violations for proper prioritization."""
-        all_detections = []
-        redsignal_violations = []
+    def _run_seatbelt_model(self, image, confidence_threshold):
+        """Run the specialized seatbelt model. Returns seatbelt and no_seatbelt detections
+        as primary authority for seatbelt-related classes."""
+        seatbelt_raw = []
+        no_seatbelt_raw = []
 
-        # Run seatbelt model
-        if self.seatbelt_model is not None:
-            try:
-                sr = self.seatbelt_model(image, conf=confidence_threshold, verbose=False)
-                if sr and len(sr) > 0:
-                    sb = sr[0].boxes
-                    if sb is not None and len(sb) > 0:
-                        for box, conf, cls_id in zip(
-                            sb.xyxy.cpu().numpy(),
-                            sb.conf.cpu().numpy(),
-                            sb.cls.cpu().numpy().astype(int),
-                        ):
-                            mapped = SEATBELT_CLASS_MAP.get(int(cls_id))
-                            if mapped:
-                                all_detections.append({
-                                    "box": box.tolist(),
-                                    "bbox": box.tolist(),
-                                    "confidence": float(conf),
-                                    "class_name": mapped,
-                                    "source": "seatbelt_model",
-                                })
-            except Exception as e:
-                logger.warning("Seatbelt model inference error: %s", e)
+        if self.seatbelt_model is None:
+            return seatbelt_raw, no_seatbelt_raw
 
-        # Run red signal / wrong side model
-        if self.redsignal_model is not None:
-            try:
-                rr = self.redsignal_model(image, conf=confidence_threshold, verbose=False)
-                if rr and len(rr) > 0:
-                    rb = rr[0].boxes
-                    if rb is not None and len(rb) > 0:
-                        for box, conf, cls_id in zip(
-                            rb.xyxy.cpu().numpy(),
-                            rb.conf.cpu().numpy(),
-                            rb.cls.cpu().numpy().astype(int),
-                        ):
-                            mapped = REDSIGNAL_CLASS_MAP.get(int(cls_id))
-                            if mapped == "license_plate":
-                                all_detections.append({
-                                    "box": box.tolist(),
-                                    "bbox": box.tolist(),
-                                    "confidence": float(conf),
-                                    "class_name": "license_plate",
-                                    "source": "redsignal_model",
-                                })
-                            elif mapped in ("wrong_direction", "red_light_violation", "illegal_parking"):
-                                redsignal_violations.append({
-                                    "box": box.tolist(),
-                                    "bbox": box.tolist(),
-                                    "confidence": float(conf),
-                                    "class_name": mapped,
-                                    "source": "redsignal_model",
-                                })
-            except Exception as e:
-                logger.warning("Red signal model inference error: %s", e)
+        try:
+            sr = self.seatbelt_model(image, conf=confidence_threshold, verbose=False)
+            if sr and len(sr) > 0:
+                sb = sr[0].boxes
+                if sb is not None and len(sb) > 0:
+                    for box, conf, cls_id in zip(
+                        sb.xyxy.cpu().numpy(),
+                        sb.conf.cpu().numpy(),
+                        sb.cls.cpu().numpy().astype(int),
+                    ):
+                        entry = {
+                            "box": box.tolist(),
+                            "bbox": box.tolist(),
+                            "confidence": float(conf),
+                            "class_id": int(cls_id),
+                            "source": "seatbelt_model",
+                        }
+                        mapped = SEATBELT_CLASS_MAP.get(int(cls_id))
+                        if mapped == "seatbelt":
+                            entry["class_name"] = "seatbelt"
+                            seatbelt_raw.append(entry)
+                        elif mapped == "no_seatbelt":
+                            entry["class_name"] = "no_seatbelt"
+                            no_seatbelt_raw.append(entry)
+        except Exception as e:
+            logger.warning("Seatbelt model inference error: %s", e)
 
-        return all_detections, redsignal_violations
+        return seatbelt_raw, no_seatbelt_raw
+
+    def _run_redsignal_model(self, image, confidence_threshold):
+        """Run the specialized red signal / wrong side model. Returns ML violation
+        detections and license plate region hints."""
+        ml_violations = []
+        plate_hints = []
+
+        if self.redsignal_model is None:
+            return ml_violations, plate_hints
+
+        try:
+            rr = self.redsignal_model(image, conf=confidence_threshold, verbose=False)
+            if rr and len(rr) > 0:
+                rb = rr[0].boxes
+                if rb is not None and len(rb) > 0:
+                    for box, conf, cls_id in zip(
+                        rb.xyxy.cpu().numpy(),
+                        rb.conf.cpu().numpy(),
+                        rb.cls.cpu().numpy().astype(int),
+                    ):
+                        mapped = REDSIGNAL_CLASS_MAP.get(int(cls_id))
+                        if mapped == "license_plate":
+                            plate_hints.append({
+                                "box": box.tolist(),
+                                "bbox": box.tolist(),
+                                "confidence": float(conf),
+                                "class_name": "license_plate",
+                                "source": "redsignal_model",
+                            })
+                        elif mapped in ("wrong_direction", "red_light_violation", "illegal_parking"):
+                            ml_violations.append({
+                                "box": box.tolist(),
+                                "bbox": box.tolist(),
+                                "confidence": float(conf),
+                                "class_name": mapped,
+                                "source": "redsignal_model",
+                            })
+        except Exception as e:
+            logger.warning("Red signal model inference error: %s", e)
+
+        return ml_violations, plate_hints
 
     def compute_iou(self, box1, box2):
         x1 = max(box1[0], box2[0])
@@ -360,8 +383,24 @@ class ViolationDetector:
     def extract_plate_text(self, image, vehicle_box):
         return self.plate_recognizer.extract_plate_text(image, vehicle_box)
 
+    def _extract_plate_with_hints(self, image, vehicle_box, plate_hints, overlap_threshold=0.2):
+        """Try vehicle-based plate extraction first, then fall back to
+        redsignal model's license plate region hints."""
+        plate = self.extract_plate_text(image, vehicle_box)
+        if plate:
+            return plate
+        # Fallback: try the closest plate hint overlapping with vehicle box
+        if plate_hints:
+            for ph in plate_hints:
+                iou = self.compute_iou(vehicle_box, ph["box"])
+                if iou > overlap_threshold:
+                    plate = self.extract_plate_text(image, ph["box"])
+                    if plate:
+                        return plate
+        return None
+
     def detect_violations(
-        self, image, confidence_threshold=0.01, enable_preprocessing=True
+        self, image, confidence_threshold=None, enable_preprocessing=True
     ):
         if isinstance(image, str):
             original_image = cv2.imread(image)
@@ -378,7 +417,13 @@ class ViolationDetector:
         else:
             conditions = {}
 
-        results = self.model(proc_image, conf=confidence_threshold, verbose=False)
+        # Use per-model tuned confidence thresholds for maximum coverage
+        base_conf = confidence_threshold if confidence_threshold is not None else self.conf_thresholds["base"]
+        helmet_conf = self.conf_thresholds["helmet"]
+        seatbelt_conf = self.conf_thresholds["seatbelt"]
+        redsignal_conf = self.conf_thresholds["redsignal"]
+
+        results = self.model(proc_image, conf=base_conf, verbose=False)
 
         violations = []
         detections = []
@@ -404,46 +449,51 @@ class ViolationDetector:
                     }
                 )
 
-        # Run specialized ensemble models
-        # Helmet model is PRIMARY authority for helmet/no_helmet detection
-        h_helmet, h_no_helmet, h_riders, h_vehicles = self._run_helmet_model(proc_image, confidence_threshold)
-        specialized_dets, ml_violations = self._run_ensemble_models(proc_image, confidence_threshold)
+        # --- SPECIALIZED MODEL INFERENCE (each at its own tuned threshold) ---
 
-        # Strip base model helmet/no_helmet detections that overlap with helmet model predictions
+        # 1. Helmet model — PRIMARY authority for helmet/no_helmet
+        h_helmet, h_no_helmet, h_riders, h_vehicles = self._run_helmet_model(proc_image, helmet_conf)
+
+        # 2. Seatbelt model — PRIMARY authority for seatbelt/no_seatbelt
+        s_seatbelt, s_no_seatbelt = self._run_seatbelt_model(proc_image, seatbelt_conf)
+
+        # 3. Red signal / wrong side model — ML violation detection + plate hints
+        ml_violations, plate_hints = self._run_redsignal_model(proc_image, redsignal_conf)
+
+        # --- STRIP OVERLAPPING BASE MODEL DETECTIONS (specialized models win) ---
         helmet_model_boxes = [d["box"] for d in h_helmet + h_no_helmet]
+        seatbelt_model_boxes = [d["box"] for d in s_seatbelt + s_no_seatbelt]
+
         filtered = []
         for d in detections:
             cls = d["class_name"]
+            # Strip base model helmet/no_helmet where helmet model has a prediction
             if cls in ("helmet", "no_helmet"):
-                is_overlapping = any(self.compute_iou(d["box"], hb) > self.iou_threshold for hb in helmet_model_boxes)
-                if is_overlapping:
+                if any(self.compute_iou(d["box"], hb) > self.iou_threshold for hb in helmet_model_boxes):
+                    continue
+            # Strip base model seatbelt/no_seatbelt where seatbelt model has a prediction
+            if cls in ("seatbelt", "no_seatbelt", "without_seatbelt"):
+                if any(self.compute_iou(d["box"], sb) > self.iou_threshold for sb in seatbelt_model_boxes):
                     continue
             filtered.append(d)
         detections = filtered
 
-        # Add helmet model's rider/vehicle detections to enrich detection pool
+        # Add specialized model detections to pool
         for d in h_riders + h_vehicles:
             detections.append(d)
+        for d in plate_hints:
+            detections.append(d)
 
-        # Add seatbelt/plate specialized detections
-        for sd in specialized_dets:
-            detections.append(sd)
-
-        riders = [
-            d for d in detections if d["class_name"] == "rider"
-        ]
+        # --- CATEGORIZE DETECTIONS (specialized models as primary) ---
+        riders = [d for d in detections if d["class_name"] == "rider"]
         vehicles = [
-            d
-            for d in detections
+            d for d in detections
             if d["class_name"] in ["vehicle", "car", "truck", "bus", "motorcycle"]
         ]
 
-        # Use helmet model detections as PRIMARY source for helmet/no_helmet
-        # These already represent validated people (driver/passenger), no _is_head_region needed
+        # Helmet/no_helmet: helmet model first, then remaining base model
         helmets = list(h_helmet)
         no_helmets = list(h_no_helmet)
-
-        # Also include any remaining base-model helmet/no_helmet not overlapping helmet model
         for d in filtered:
             cls = d["class_name"]
             if cls == "helmet":
@@ -451,12 +501,15 @@ class ViolationDetector:
             elif cls in ("no_helmet", "without_helmet"):
                 no_helmets.append(d)
 
-        seatbelts = [d for d in detections if d["class_name"] == "seatbelt"]
-        no_seatbelts = [
-            d
-            for d in detections
-            if d["class_name"] in ["no_seatbelt", "without_seatbelt"]
-        ]
+        # Seatbelt/no_seatbelt: seatbelt model first, then remaining base model
+        seatbelts = list(s_seatbelt)
+        no_seatbelts = list(s_no_seatbelt)
+        for d in filtered:
+            cls = d["class_name"]
+            if cls == "seatbelt":
+                seatbelts.append(d)
+            elif cls in ("no_seatbelt", "without_seatbelt"):
+                no_seatbelts.append(d)
 
         now = datetime.now().isoformat()
 
@@ -496,7 +549,7 @@ class ViolationDetector:
                             best_iou = iou
                             best_vbox = veh["box"]
                     if best_vbox is not None and best_iou > 0.05:
-                        plate = self.extract_plate_text(original_image, best_vbox)
+                        plate = self._extract_plate_with_hints(original_image, best_vbox, plate_hints)
                 violations.append(
                     {
                         "type": "NO HELMET",
@@ -517,7 +570,7 @@ class ViolationDetector:
                 )
                 if not has_helmet:
                     veh_bbox = rider_vehicle_map.get(ri, rider_box)
-                    plate = self.extract_plate_text(original_image, veh_bbox)
+                    plate = self._extract_plate_with_hints(original_image, veh_bbox, plate_hints)
                     violations.append(
                         {
                             "type": "NO HELMET",
@@ -532,7 +585,7 @@ class ViolationDetector:
         # NO SEATBELT
         if no_seatbelts:
             for det in no_seatbelts:
-                plate = self.extract_plate_text(original_image, det["box"])
+                plate = self._extract_plate_with_hints(original_image, det["box"], plate_hints)
                 violations.append(
                     {
                         "type": "NO SEATBELT",
@@ -552,7 +605,7 @@ class ViolationDetector:
                     for sb in seatbelts
                 )
                 if not has_seatbelt:
-                    plate = self.extract_plate_text(original_image, vbox)
+                    plate = self._extract_plate_with_hints(original_image, vbox, plate_hints)
                     violations.append(
                         {
                             "type": "NO SEATBELT",
@@ -609,7 +662,7 @@ class ViolationDetector:
                 people_count = count_overlapping(no_helmets, expanded)
 
             if people_count > 2:
-                plate = self.extract_plate_text(original_image, vbox)
+                plate = self._extract_plate_with_hints(original_image, vbox, plate_hints)
                 violations.append({
                     "type": "TRIPLE RIDING",
                     "violation_type": "TRIPLE RIDING",
@@ -650,7 +703,7 @@ class ViolationDetector:
                             all_x = [c for d in window for c in (d["box"][0], d["box"][2])]
                             all_y = [c for d in window for c in (d["box"][1], d["box"][3])]
                             cluster_box = [min(all_x), min(all_y), max(all_x), max(all_y)]
-                            plate = self.extract_plate_text(original_image, cluster_box)
+                            plate = self._extract_plate_with_hints(original_image, cluster_box, plate_hints)
                             avg_conf = sum(d["confidence"] for d in window) / len(window)
                             violations.append({
                                 "type": "TRIPLE RIDING",
