@@ -1,13 +1,12 @@
 import cv2
-import numpy as np
 
 
 def enhance_low_light(image):
     lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
-    l, a, b = cv2.split(lab)
+    lightness, a, b = cv2.split(lab)
     clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-    l = clahe.apply(l)
-    enhanced = cv2.merge([l, a, b])
+    lightness = clahe.apply(lightness)
+    enhanced = cv2.merge([lightness, a, b])
     return cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
 
 
@@ -19,7 +18,9 @@ def reduce_noise(image):
     return cv2.fastNlMeansDenoisingColored(image, None, 10, 10, 7, 21)
 
 
-def preprocess_image(image, enable_clahe=True, enable_noise_reduction=True, enable_normalize=False):
+def preprocess_image(
+    image, enable_clahe=True, enable_noise_reduction=True, enable_normalize=False
+):
     result = image.copy()
     if enable_clahe:
         result = enhance_low_light(result)

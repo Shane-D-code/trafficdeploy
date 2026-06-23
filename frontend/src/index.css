@@ -1,0 +1,340 @@
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Rajdhani', sans-serif;
+    background: #0B0F13;
+    color: #EAEAEA;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: #0B0F13; }
+  ::-webkit-scrollbar-thumb { background: #3A434F; }
+  ::-webkit-scrollbar-thumb:hover { background: #A3FF3C; }
+  ::selection { background: rgba(163, 255, 60, 0.3); color: #0B0F13; }
+}
+
+@layer components {
+  /* ─── HUD Panel ─── */
+  .hud-panel {
+    background: #1B232C;
+    border: 1px solid #3A434F;
+    position: relative;
+    box-shadow: 0 0 10px rgba(163, 255, 60, 0.03), inset 0 0 15px rgba(163, 255, 60, 0.02);
+  }
+  .hud-panel::before,
+  .hud-panel::after {
+    content: '';
+    position: absolute;
+    width: 12px; height: 12px;
+    border-color: rgba(163, 255, 60, 0.4);
+    border-style: solid;
+  }
+  .hud-panel::before {
+    top: -1px; left: -1px;
+    border-width: 2px 0 0 2px;
+  }
+  .hud-panel::after {
+    top: -1px; right: -1px;
+    border-width: 2px 2px 0 0;
+  }
+
+  .hud-panel .corner-bl,
+  .hud-panel .corner-br { position: absolute; width: 12px; height: 12px; border-color: rgba(163, 255, 60, 0.4); border-style: solid; }
+  .hud-panel .corner-bl { bottom: -1px; left: -1px; border-width: 0 0 2px 2px; }
+  .hud-panel .corner-br { bottom: -1px; right: -1px; border-width: 0 2px 2px 0; }
+
+  .hud-panel:hover {
+    border-color: rgba(163, 255, 60, 0.3);
+    box-shadow: 0 0 20px rgba(163, 255, 60, 0.06), inset 0 0 20px rgba(163, 255, 60, 0.03);
+  }
+  .hud-panel:hover::before,
+  .hud-panel:hover::after,
+  .hud-panel:hover .corner-bl,
+  .hud-panel:hover .corner-br {
+    border-color: rgba(163, 255, 60, 0.7);
+  }
+
+  .hud-title {
+    font-family: 'Orbitron', sans-serif;
+    font-weight: 600;
+    font-size: 0.7rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: #A3FF3C;
+  }
+
+  .hud-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.65rem;
+    color: #6B7280;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .hud-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 500;
+    color: #EAEAEA;
+  }
+
+  /* ─── HUD Button ─── */
+  .hud-btn {
+    font-family: 'Rajdhani', sans-serif;
+    font-weight: 600;
+    font-size: 0.8rem;
+    letter-spacing: 0.05em;
+    padding: 8px 20px;
+    background: transparent;
+    border: 1px solid #3A434F;
+    color: #EAEAEA;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    position: relative;
+    text-transform: uppercase;
+  }
+  .hud-btn::before,
+  .hud-btn::after {
+    content: '';
+    position: absolute;
+    width: 6px; height: 6px;
+    border-color: rgba(163, 255, 60, 0.4);
+    border-style: solid;
+    transition: border-color 0.15s ease;
+  }
+  .hud-btn::before { top: -1px; left: -1px; border-width: 1px 0 0 1px; }
+  .hud-btn::after { top: -1px; right: -1px; border-width: 1px 1px 0 0; }
+  .hud-btn .corner-bl,
+  .hud-btn .corner-br { position: absolute; width: 6px; height: 6px; border-color: rgba(163, 255, 60, 0.4); border-style: solid; transition: border-color 0.15s ease; }
+  .hud-btn .corner-bl { bottom: -1px; left: -1px; border-width: 0 0 1px 1px; }
+  .hud-btn .corner-br { bottom: -1px; right: -1px; border-width: 0 1px 1px 0; }
+  .hud-btn:hover {
+    border-color: #A3FF3C;
+    background: rgba(163, 255, 60, 0.05);
+    box-shadow: 0 0 15px rgba(163, 255, 60, 0.1);
+  }
+  .hud-btn:hover::before,
+  .hud-btn:hover::after,
+  .hud-btn:hover .corner-bl,
+  .hud-btn:hover .corner-br { border-color: rgba(163, 255, 60, 0.8); }
+  .hud-btn:active { transform: scale(0.98); }
+  .hud-btn:disabled { opacity: 0.3; cursor: not-allowed; transform: none; }
+  .hud-btn-primary {
+    border-color: #A3FF3C;
+    color: #A3FF3C;
+    background: rgba(163, 255, 60, 0.08);
+  }
+  .hud-btn-primary:hover {
+    background: rgba(163, 255, 60, 0.15);
+    box-shadow: 0 0 20px rgba(163, 255, 60, 0.15);
+  }
+  .hud-btn-danger { border-color: #FF5D5D; color: #FF5D5D; }
+  .hud-btn-danger:hover { background: rgba(255, 93, 93, 0.1); border-color: #FF5D5D; }
+
+  /* ─── Scan Overlay ─── */
+  .scan-overlay {
+    position: relative;
+    overflow: hidden;
+  }
+  .scan-overlay::before {
+    content: '';
+    position: absolute;
+    left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, rgba(163, 255, 60, 0.4), transparent);
+    animation: scanLine 2s ease-in-out infinite;
+    z-index: 5;
+    pointer-events: none;
+  }
+  .scan-overlay::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(90deg, rgba(163,255,60,0.02) 1px, transparent 1px),
+      linear-gradient(0deg, rgba(163,255,60,0.02) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 4;
+  }
+
+  /* ─── Status Dot ─── */
+  .status-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+  .status-dot.online { background: #A3FF3C; box-shadow: 0 0 6px rgba(163,255,60,0.6); }
+  .status-dot.offline { background: #FF5D5D; box-shadow: 0 0 6px rgba(255,93,93,0.6); }
+  .status-dot.warning { background: #FFD43B; box-shadow: 0 0 6px rgba(255,212,59,0.6); }
+
+  /* ─── Input ─── */
+  .hud-input {
+    background: #141A20;
+    border: 1px solid #3A434F;
+    padding: 8px 12px;
+    color: #EAEAEA;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.8rem;
+    outline: none;
+    transition: border-color 0.15s ease;
+  }
+  .hud-input:focus { border-color: rgba(163, 255, 60, 0.5); box-shadow: 0 0 10px rgba(163, 255, 60, 0.05); }
+
+  /* ─── Tag / Badge ─── */
+  .hud-tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 8px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.65rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .hud-tag-green { background: rgba(163, 255, 60, 0.1); color: #A3FF3C; border: 1px solid rgba(163, 255, 60, 0.2); }
+  .hud-tag-red { background: rgba(255, 93, 93, 0.1); color: #FF5D5D; border: 1px solid rgba(255, 93, 93, 0.2); }
+  .hud-tag-yellow { background: rgba(255, 212, 59, 0.1); color: #FFD43B; border: 1px solid rgba(255, 212, 59, 0.2); }
+  .hud-tag-cyan { background: rgba(123, 255, 123, 0.1); color: #7BFF7B; border: 1px solid rgba(123, 255, 123, 0.2); }
+
+  /* ─── Radar ─── */
+  .radar {
+    position: relative;
+    width: 80px; height: 80px;
+    border-radius: 50%;
+    border: 1px solid rgba(163, 255, 60, 0.2);
+    overflow: hidden;
+  }
+  .radar::before {
+    content: '';
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 50%; height: 1px;
+    background: linear-gradient(90deg, rgba(163, 255, 60, 0.6), transparent);
+    transform-origin: left center;
+    animation: radarSweep 3s linear infinite;
+  }
+  .radar::after {
+    content: '';
+    position: absolute;
+    inset: 25%;
+    border-radius: 50%;
+    border: 1px solid rgba(163, 255, 60, 0.15);
+  }
+  .radar-dot {
+    position: absolute;
+    width: 3px; height: 3px;
+    border-radius: 50%;
+    background: rgba(163, 255, 60, 0.8);
+    box-shadow: 0 0 4px rgba(163, 255, 60, 0.6);
+  }
+
+  /* ─── Terminal ─── */
+  .terminal-line {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    line-height: 1.6;
+  }
+  .terminal-cursor::after {
+    content: '▌';
+    animation: typing 0.8s step-end infinite;
+    color: rgba(163, 255, 60, 0.8);
+  }
+
+  /* ─── Target Lock ─── */
+  .target-lock {
+    position: relative;
+    display: inline-block;
+  }
+  .target-lock .tl-corner {
+    position: absolute;
+    width: 16px; height: 16px;
+    border-color: rgba(163, 255, 60, 0.5);
+    border-style: solid;
+    animation: bracketPulse 2s ease-in-out infinite;
+  }
+  .target-lock .tl-tl { top: 0; left: 0; border-width: 2px 0 0 2px; }
+  .target-lock .tl-tr { top: 0; right: 0; border-width: 2px 2px 0 0; }
+  .target-lock .tl-bl { bottom: 0; left: 0; border-width: 0 0 2px 2px; }
+  .target-lock .tl-br { bottom: 0; right: 0; border-width: 0 2px 2px 0; }
+
+  /* ─── Data Feed ─── */
+  .data-feed-item {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.7rem;
+    padding: 4px 0;
+    border-bottom: 1px solid rgba(58, 67, 79, 0.3);
+    animation: dataFeed 0.5s ease-out;
+  }
+  .data-feed-item:last-child { border-bottom: none; }
+  .data-feed-time { color: #6B7280; }
+  .data-feed-dot { color: #A3FF3C; }
+
+  /* ─── Table ─── */
+  .hud-table th {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #6B7280;
+    padding: 10px 12px;
+    border-bottom: 1px solid #3A434F;
+    text-align: left;
+    font-weight: 500;
+  }
+  .hud-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid rgba(58, 67, 79, 0.3);
+    font-size: 0.8rem;
+  }
+  .hud-table tr:hover td { background: rgba(163, 255, 60, 0.02); }
+
+  /* ─── Progress ─── */
+  .hud-progress {
+    height: 4px;
+    background: #3A434F;
+    overflow: hidden;
+  }
+  .hud-progress-fill {
+    height: 100%;
+    background: #A3FF3C;
+    transition: width 0.5s ease;
+    box-shadow: 0 0 8px rgba(163, 255, 60, 0.4);
+  }
+
+  /* ─── Live indicator ─── */
+  .live-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.65rem;
+    color: #A3FF3C;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  .live-indicator::before {
+    content: '';
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #A3FF3C;
+    box-shadow: 0 0 6px rgba(163, 255, 60, 0.6);
+    animation: blinkDot 1.5s step-end infinite;
+  }
+}
+
+.recharts-text { fill: #6B7280 !important; font-size: 11px !important; font-family: 'IBM Plex Mono', monospace !important; }
+.recharts-cartesian-grid-horizontal line,
+.recharts-cartesian-grid-vertical line { stroke: rgba(58, 67, 79, 0.3) !important; }
+.recharts-tooltip-wrapper .recharts-default-tooltip {
+  background: #1B232C !important;
+  border: 1px solid #3A434F !important;
+  border-radius: 0 !important;
+}

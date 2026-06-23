@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    environment:
+      - NODE_ENV=production
+      - PYTHON_PATH=python3
+      - PYTHON_MODULE_PATH=/app/python
+      - DB_PATH=/app/data/traffic_violations.db
+      - CORS_ORIGIN=http://localhost:3000,http://localhost:80
+      - UPLOAD_DIR=/app/uploads
+    volumes:
+      - ./traffic_violation_project:/app/python
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+    networks:
+      - gridlock-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - gridlock-network
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - gridlock-network
+
+networks:
+  gridlock-network:
+    driver: bridge

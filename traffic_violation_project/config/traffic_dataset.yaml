@@ -1,0 +1,12 @@
+path: ../datasets/violation_data
+train: images
+val: images
+
+nc: 6
+names:
+  - person_rider
+  - helmet
+  - no_helmet
+  - vehicle
+  - seatbelt
+  - no_seatbelt
