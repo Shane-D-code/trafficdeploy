@@ -1,61 +1,28 @@
 services:
   - type: web
     name: gridlock-backend
-    runtime: node
+    runtime: image
     plan: free
     region: oregon
-
-    rootDir: backend
-    buildCommand: |
-      echo "Installing Node dependencies..."
-      npm install --production=false
-      echo "Building TypeScript..."
-      npm run build
-      echo "Installing Python dependencies..."
-      cd ../traffic_violation_project
-      pip install -r requirements.txt
-      echo "Build complete"
-
-    startCommand: node dist/app.js
-
+    image:
+      url: node:20-bullseye
+      command: |
+        apt-get update && apt-get install -y python3 python3-pip
+        cd /opt/render/project/src/backend
+        npm install --omit=dev
+        npm run build
+        node dist/app.js
     envVars:
-      - key: NODE_ENV
-        value: production
-      - key: PORT
-        value: 5000
-      - key: PYTHON_PATH
-        value: python3
-      - key: PYTHON_MODULE_PATH
-        value: /opt/render/project/src/traffic_violation_project
-      - key: DB_PATH
-        value: /opt/render/project/src/data/traffic_violations.db
       - key: HF_TOKEN
         sync: false
-      - key: JWT_SECRET
-        generateValue: true
-      - key: CORS_ORIGIN
-        value: https://gridlock-frontend.onrender.com
-
-    healthCheckPath: /api/health
 
   - type: web
     name: gridlock-frontend
     runtime: node
     plan: free
     region: oregon
-
     rootDir: frontend
     buildCommand: |
-      echo "Installing frontend dependencies..."
       npm install
-      echo "Building React app..."
       npm run build
-      echo "Frontend build complete"
-
     startCommand: npx serve -s dist -l 3000
-
-    envVars:
-      - key: VITE_API_URL
-        value: https://gridlock-backend.onrender.com/api
-      - key: VITE_WS_URL
-        value: wss://gridlock-backend.onrender.com/ws

@@ -1,6 +1,6 @@
-FROM node:18-alpine
+FROM node:20-bullseye
 
-RUN apk add --no-cache python3 py3-pip py3-numpy py3-opencv py3-pillow
+RUN apt-get update && apt-get install -y python3 python3-pip && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
