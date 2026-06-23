@@ -7,6 +7,7 @@ import { StatsCards } from '../components/dashboard/StatsCards';
 import { ViolationTimeline } from '../components/dashboard/ViolationTimeline';
 import { LiveFeed } from '../components/dashboard/LiveFeed';
 import { HudCard } from '../components/common/HudCard';
+import { Heatmap } from '../components/maps/Heatmap';
 import { ViolationHeatmap } from '../components/maps/ViolationHeatmap';
 import { RiskScoreCard } from '../components/dashboard/RiskScoreCard';
 import { AISummary } from '../components/dashboard/AISummary';
@@ -104,14 +105,22 @@ const Dashboard: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <div className="lg:col-span-1">
-          <HudCard title="Violation Heatmap" accent>
-            <ViolationHeatmap />
+        <div className="lg:col-span-2">
+          <HudCard title="📍 Violation Heatmap" accent>
+            <Heatmap />
           </HudCard>
         </div>
         <div className="lg:col-span-1">
           <HudCard title="Repeat Offenders" accent>
             <RiskScoreCard />
+          </HudCard>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <div className="lg:col-span-1">
+          <HudCard title="Violation Dots" accent>
+            <ViolationHeatmap />
           </HudCard>
         </div>
         <div className="lg:col-span-1">

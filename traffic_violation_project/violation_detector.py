@@ -15,6 +15,9 @@ logger = logging.getLogger(__name__)
 _BASE_DIR = Path(__file__).parent.resolve()
 _DEFAULT_MODEL_PATH = str(_BASE_DIR / "models" / "traffic_violation_best.pt")
 _DEFAULT_PLATE_MODEL_PATH = str(_BASE_DIR / "models" / "license_plate_best.pt")
+_DEFAULT_HELMET_MODEL_PATH = str(_BASE_DIR / "models" / "helmet_final_best.pt")
+_DEFAULT_SEATBELT_MODEL_PATH = str(_BASE_DIR / "models" / "seatbelt_best.pt")
+_DEFAULT_REDSIGNAL_MODEL_PATH = str(_BASE_DIR / "models" / "all_redsignal_wrongside_best.pt")
 
 from license_plate_recognition import LicensePlateRecognizer
 from preprocessing import preprocess_image
@@ -46,6 +49,28 @@ CLASS_NAME_MAP = {
     "without_seatbelt": "no_seatbelt",
 }
 
+HELMET_CLASS_MAP = {
+    0: "helmet",        # driver_with_helmet → helmet
+    1: "vehicle",       # bike → vehicle
+    2: "rider",         # driver → rider
+    3: "helmet",        # passenger_with_helmet → helmet
+    4: "no_helmet",     # driver_without_helmet → no_helmet
+    5: "no_helmet",     # passenger_without_helmet → no_helmet
+}
+
+SEATBELT_CLASS_MAP = {
+    0: "seatbelt",      # Seat_Belt → seatbelt
+    1: "no_seatbelt",   # WithoutSeat_Belt → no_seatbelt
+}
+
+REDSIGNAL_CLASS_MAP = {
+    0: "correct_direction",
+    1: "wrong_direction",
+    2: "illegal_parking",
+    3: "license_plate",
+    4: "red_light_violation",
+}
+
 
 def _standardize_class_name(class_name):
     return CLASS_NAME_MAP.get(class_name, class_name)
@@ -65,12 +90,22 @@ class ViolationDetector:
         self,
         model_path=None,
         plate_model_path=None,
+        helmet_model_path=None,
+        seatbelt_model_path=None,
+        redsignal_model_path=None,
         device="cpu",
+        use_enhanced_models=False,
     ):
         model_path = model_path or _DEFAULT_MODEL_PATH
         plate_model_path = plate_model_path or _DEFAULT_PLATE_MODEL_PATH
+        helmet_model_path = helmet_model_path or _DEFAULT_HELMET_MODEL_PATH
+        seatbelt_model_path = seatbelt_model_path or _DEFAULT_SEATBELT_MODEL_PATH
+        redsignal_model_path = redsignal_model_path or _DEFAULT_REDSIGNAL_MODEL_PATH
         model_path = str(Path(model_path)) if Path(model_path).is_absolute() else str(_BASE_DIR / model_path)
         plate_model_path = str(Path(plate_model_path)) if Path(plate_model_path).is_absolute() else str(_BASE_DIR / plate_model_path)
+        helmet_model_path = str(Path(helmet_model_path)) if Path(helmet_model_path).is_absolute() else str(_BASE_DIR / helmet_model_path)
+        seatbelt_model_path = str(Path(seatbelt_model_path)) if Path(seatbelt_model_path).is_absolute() else str(_BASE_DIR / seatbelt_model_path)
+        redsignal_model_path = str(Path(redsignal_model_path)) if Path(redsignal_model_path).is_absolute() else str(_BASE_DIR / redsignal_model_path)
 
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Model not found at: {model_path}")
@@ -82,6 +117,23 @@ class ViolationDetector:
             logger.info("Traffic model loaded on GPU")
         else:
             logger.info("Traffic model loaded on CPU")
+
+        # Load specialized ensemble models
+        self.helmet_model = None
+        self.seatbelt_model = None
+        self.redsignal_model = None
+        for name, path in [("helmet", helmet_model_path), ("seatbelt", seatbelt_model_path), ("redsignal", redsignal_model_path)]:
+            if os.path.exists(path):
+                try:
+                    m = YOLO(path)
+                    if self.device == "cuda" and torch.cuda.is_available():
+                        m.to("cuda")
+                    setattr(self, f"{name}_model", m)
+                    logger.info("%s model loaded: %s", name, os.path.basename(path))
+                except Exception as e:
+                    logger.warning("Failed to load %s model at %s: %s", name, path, e)
+            else:
+                logger.warning("%s model not found at %s, skipping", name, path)
 
         self.plate_recognizer = LicensePlateRecognizer(
             plate_model_path if plate_model_path else None, device
@@ -95,6 +147,137 @@ class ViolationDetector:
         self.explanation_engine = ExplanationEngine()
         self.evidence_generator = EvidenceGenerator()
         self.vehicle_classifier = VehicleClassifier(model_path)
+        self.use_enhanced_models = use_enhanced_models
+        self.enhanced_pipeline = None
+
+        if use_enhanced_models:
+            self._init_enhanced_models()
+
+    def _init_enhanced_models(self):
+        """Initialize enhanced models (VehicleNet, StreetSignSense, EULPR)"""
+        try:
+            import sys as _sys
+            _enhanced_path = str(_BASE_DIR.parent / "python")
+            if _enhanced_path not in _sys.path:
+                _sys.path.insert(0, _enhanced_path)
+
+            from enhanced_detection_pipeline import EnhancedDetectionPipeline
+            self.enhanced_pipeline = EnhancedDetectionPipeline(use_enhanced=True)
+            logger.info("Enhanced models (UVH-26, StreetSignSense, EULPR) loaded")
+        except ImportError as e:
+            logger.warning("Enhanced models not available: %s. Install with: pip install huggingface_hub", e)
+            self.use_enhanced_models = False
+        except Exception as e:
+            logger.warning("Failed to load enhanced models: %s", e)
+            self.use_enhanced_models = False
+
+    def _merge_detections(self, base_detections, specialized_detections, merge_classes):
+        """Merge specialized model detections into base detections, preferring
+        the specialized model's prediction for overlapping boxes of merge_classes."""
+        merged = list(base_detections)
+        for sd in specialized_detections:
+            cls = sd["class_name"]
+            if cls not in merge_classes:
+                continue
+            # Check overlap with existing merged detections of same class
+            is_duplicate = False
+            for md in merged:
+                if md["class_name"] == cls and self.compute_iou(sd["box"], md["box"]) > self.iou_threshold:
+                    if sd["confidence"] > md["confidence"]:
+                        md.update(sd)
+                    is_duplicate = True
+                    break
+            if not is_duplicate:
+                merged.append(sd)
+        return merged
+
+    def _run_ensemble_models(self, image, confidence_threshold):
+        """Run all specialized models and merge their detections with base model output."""
+        all_detections = []
+
+        # Run helmet model
+        if self.helmet_model is not None:
+            try:
+                hr = self.helmet_model(image, conf=confidence_threshold, verbose=False)
+                if hr and len(hr) > 0:
+                    hb = hr[0].boxes
+                    if hb is not None and len(hb) > 0:
+                        for box, conf, cls_id in zip(
+                            hb.xyxy.cpu().numpy(),
+                            hb.conf.cpu().numpy(),
+                            hb.cls.cpu().numpy().astype(int),
+                        ):
+                            mapped = HELMET_CLASS_MAP.get(int(cls_id))
+                            if mapped:
+                                all_detections.append({
+                                    "box": box.tolist(),
+                                    "bbox": box.tolist(),
+                                    "confidence": float(conf),
+                                    "class_name": mapped,
+                                    "source": "helmet_model",
+                                })
+            except Exception as e:
+                logger.warning("Helmet model inference error: %s", e)
+
+        # Run seatbelt model
+        if self.seatbelt_model is not None:
+            try:
+                sr = self.seatbelt_model(image, conf=confidence_threshold, verbose=False)
+                if sr and len(sr) > 0:
+                    sb = sr[0].boxes
+                    if sb is not None and len(sb) > 0:
+                        for box, conf, cls_id in zip(
+                            sb.xyxy.cpu().numpy(),
+                            sb.conf.cpu().numpy(),
+                            sb.cls.cpu().numpy().astype(int),
+                        ):
+                            mapped = SEATBELT_CLASS_MAP.get(int(cls_id))
+                            if mapped:
+                                all_detections.append({
+                                    "box": box.tolist(),
+                                    "bbox": box.tolist(),
+                                    "confidence": float(conf),
+                                    "class_name": mapped,
+                                    "source": "seatbelt_model",
+                                })
+            except Exception as e:
+                logger.warning("Seatbelt model inference error: %s", e)
+
+        # Run red signal / wrong side model
+        redsignal_violations = []
+        if self.redsignal_model is not None:
+            try:
+                rr = self.redsignal_model(image, conf=confidence_threshold, verbose=False)
+                if rr and len(rr) > 0:
+                    rb = rr[0].boxes
+                    if rb is not None and len(rb) > 0:
+                        for box, conf, cls_id in zip(
+                            rb.xyxy.cpu().numpy(),
+                            rb.conf.cpu().numpy(),
+                            rb.cls.cpu().numpy().astype(int),
+                        ):
+                            mapped = REDSIGNAL_CLASS_MAP.get(int(cls_id))
+                            # License plate detections feed into plate recognizer later
+                            if mapped == "license_plate":
+                                all_detections.append({
+                                    "box": box.tolist(),
+                                    "bbox": box.tolist(),
+                                    "confidence": float(conf),
+                                    "class_name": "license_plate",
+                                    "source": "redsignal_model",
+                                })
+                            elif mapped in ("wrong_direction", "red_light_violation", "illegal_parking"):
+                                redsignal_violations.append({
+                                    "box": box.tolist(),
+                                    "bbox": box.tolist(),
+                                    "confidence": float(conf),
+                                    "class_name": mapped,
+                                    "source": "redsignal_model",
+                                })
+            except Exception as e:
+                logger.warning("Red signal model inference error: %s", e)
+
+        return all_detections, redsignal_violations
 
     def compute_iou(self, box1, box2):
         x1 = max(box1[0], box2[0])
@@ -127,6 +310,50 @@ class ViolationDetector:
         driver_y2 = y1 + int(height * 0.7)
 
         return [driver_x1, driver_y1, driver_x2, driver_y2]
+
+    def _is_head_region(self, nh_box, riders, img_h):
+        """
+        Returns True only if nh_box overlaps with the upper 35% (head zone)
+        of at least one rider, AND passes size + aspect ratio sanity checks.
+        When no riders are available, relies on size + aspect checks alone.
+        """
+        nx1, ny1, nx2, ny2 = nh_box
+        nw = nx2 - nx1
+        nh_h = ny2 - ny1
+
+        # Sanity 1: aspect ratio — heads are roughly square
+        aspect = nw / nh_h if nh_h > 0 else 0
+        if aspect < 0.4 or aspect > 2.5:
+            return False
+
+        # Sanity 2: absolute size — a head can't be tiny or gigantic
+        area = nw * nh_h
+        min_area = (img_h * 0.02) ** 2
+        max_area = (img_h * 0.35) ** 2
+        if area < min_area or area > max_area:
+            return False
+
+        # Sanity 3: if riders are available, require overlap with upper 35%
+        if riders:
+            for rider in riders:
+                rx1, ry1, rx2, ry2 = rider["box"]
+                rider_h = ry2 - ry1
+                head_zone_bottom = ry1 + rider_h * 0.35
+
+                ix1 = max(nx1, rx1)
+                iy1 = max(ny1, ry1)
+                ix2 = min(nx2, rx2)
+                iy2 = min(ny2, head_zone_bottom)
+
+                if ix2 > ix1 and iy2 > iy1:
+                    inter = (ix2 - ix1) * (iy2 - iy1)
+                    nh_area = nw * nh_h
+                    if nh_area > 0 and inter / nh_area > 0.25:
+                        return True
+            return False
+
+        # No riders to cross-check — pass based on size + aspect
+        return True
 
     def extract_plate_text(self, image, vehicle_box):
         return self.plate_recognizer.extract_plate_text(image, vehicle_box)
@@ -175,6 +402,14 @@ class ViolationDetector:
                     }
                 )
 
+        # Run specialized ensemble models on the preprocessed image
+        specialized_dets, ml_violations = self._run_ensemble_models(proc_image, confidence_threshold)
+
+        # Merge specialized detections: helmet/no_helmet, seatbelt/no_seatbelt, vehicle, rider
+        detections = self._merge_detections(
+            detections, specialized_dets, ["helmet", "no_helmet", "seatbelt", "no_seatbelt", "vehicle", "rider"]
+        )
+
         riders = [
             d for d in detections if d["class_name"] == "rider"
         ]
@@ -208,9 +443,17 @@ class ViolationDetector:
             if best_vbox is not None and best_iou > 0.05:
                 rider_vehicle_map[ri] = best_vbox
 
-        # NO HELMET
+        # NO HELMET — with head-region validation to reject bags/objects
         if no_helmets:
+            img_h_px = original_image.shape[0]
             for det in no_helmets:
+                if not self._is_head_region(det["box"], riders, img_h_px):
+                    logger.warning(
+                        "[FILTER] Rejected no_helmet at %s (conf=%.2f) — not a head region",
+                        det["box"], det["confidence"],
+                    )
+                    continue
+
                 plate = None
                 if vehicles:
                     best_iou = 0.0
@@ -289,47 +532,105 @@ class ViolationDetector:
                     )
 
         # TRIPLE RIDING
-        for vehicle in vehicles:
+        def count_overlapping(bbox_list, expanded_box):
+            ex1, ey1, ex2, ey2 = expanded_box
+            count = 0
+            for item in bbox_list:
+                ibox = item["box"] if "box" in item else item.get("bbox", [])
+                if not ibox or len(ibox) < 4:
+                    continue
+                rx1, ry1, rx2, ry2 = ibox[:4]
+                ix1 = max(ex1, rx1)
+                iy1 = max(ey1, ry1)
+                ix2 = min(ex2, rx2)
+                iy2 = min(ey2, ry2)
+                if ix1 < ix2 and iy1 < iy2:
+                    inter = (ix2 - ix1) * (iy2 - iy1)
+                    item_area = (rx2 - rx1) * (ry2 - ry1)
+                    if item_area > 0 and inter / item_area > 0.1:
+                        count += 1
+            return count
+
+        # Path A: Vehicle boxes exist — use expanded overlap counting
+        triple_riding_flagged = False
+        motos = [
+            v for v in vehicles
+            if any(k in v.get("class_name", "") for k in ["vehicle", "motorcycle", "motorbike", "bike"])
+        ]
+        for vehicle in motos:
             vbox = vehicle["box"]
             vw = vbox[2] - vbox[0]
             vh = vbox[3] - vbox[1]
 
-            # Skip wide vehicles (cars, buses) — likely not two-wheelers
-            if vw > 0 and vw / vh > 0.65:
-                continue
-
-            # Expand vehicle box upward to catch riders sitting on top
             x1, y1, x2, y2 = vbox
-            expanded_top = y1 - vh * 0.8
-            expanded_bottom = y2 + vh * 0.1
-            expanded_left = x1 - vw * 0.1
-            expanded_right = x2 + vw * 0.1
+            expanded = [
+                x1 - vw * 0.1,
+                y1 - vh * 0.8,
+                x2 + vw * 0.1,
+                y2 + vh * 0.1,
+            ]
 
-            rider_count = 0
-            for r in riders:
-                rx1, ry1, rx2, ry2 = r["box"]
-                ix1 = max(expanded_left, rx1)
-                iy1 = max(expanded_top, ry1)
-                ix2 = min(expanded_right, rx2)
-                iy2 = min(expanded_bottom, ry2)
-                if ix1 < ix2 and iy1 < iy2:
-                    inter = (ix2 - ix1) * (iy2 - iy1)
-                    rider_area = (rx2 - rx1) * (ry2 - ry1)
-                    if rider_area > 0 and inter / rider_area > 0.1:
-                        rider_count += 1
+            rider_count = count_overlapping(riders, expanded)
+            people_count = rider_count
+            if rider_count == 0 and no_helmets:
+                people_count = count_overlapping(no_helmets, expanded)
 
-            if rider_count > 2:
+            if people_count > 2:
                 plate = self.extract_plate_text(original_image, vbox)
-                violations.append(
-                    {
-                        "type": "TRIPLE RIDING",
-                        "violation_type": "TRIPLE RIDING",
-                        "confidence": vehicle["confidence"],
-                        "bbox": vbox,
-                        "plate_text": plate,
-                        "timestamp": now,
-                    }
-                )
+                violations.append({
+                    "type": "TRIPLE RIDING",
+                    "violation_type": "TRIPLE RIDING",
+                    "confidence": vehicle["confidence"],
+                    "bbox": vbox,
+                    "plate_text": plate,
+                    "timestamp": now,
+                    "rider_count": people_count,
+                    "source": "rider" if rider_count > 0 else "no_helmet_proxy",
+                })
+                triple_riding_flagged = True
+
+        # Path B: No vehicle class fired — cluster person/rider/no_helmet/no_seatbelt boxes
+        #          using horizontal + vertical geometry gates
+        if not triple_riding_flagged:
+            candidates = list(riders)
+            if not candidates:
+                candidates = [
+                    d for d in (no_helmets + no_seatbelts)
+                    if d.get("box") and len(d["box"]) >= 4
+                ]
+
+            if len(candidates) >= 3:
+                candidates.sort(key=lambda d: d["box"][0])
+                for i in range(len(candidates) - 2):
+                    window = [candidates[i]]
+                    ref_x2 = candidates[i]["box"][2]
+
+                    for j in range(i + 1, len(candidates)):
+                        if candidates[j]["box"][0] < ref_x2 + 300:
+                            window.append(candidates[j])
+                        else:
+                            break
+
+                    if len(window) >= 3:
+                        bottoms = [d["box"][3] for d in window]
+                        if max(bottoms) - min(bottoms) < 200:
+                            all_x = [c for d in window for c in (d["box"][0], d["box"][2])]
+                            all_y = [c for d in window for c in (d["box"][1], d["box"][3])]
+                            cluster_box = [min(all_x), min(all_y), max(all_x), max(all_y)]
+                            plate = self.extract_plate_text(original_image, cluster_box)
+                            avg_conf = sum(d["confidence"] for d in window) / len(window)
+                            violations.append({
+                                "type": "TRIPLE RIDING",
+                                "violation_type": "TRIPLE RIDING",
+                                "confidence": avg_conf,
+                                "bbox": cluster_box,
+                                "plate_text": plate,
+                                "timestamp": now,
+                                "rider_count": len(window),
+                                "source": "cluster_proxy",
+                            })
+                            triple_riding_flagged = True
+                            break
 
         # Rule-based violations
         for DetectorClass in [
@@ -346,7 +647,93 @@ class ViolationDetector:
                     rv["violation_type"] = rv["type"]
                 violations.append(rv)
 
+        # ML-based violations from all_redsignal_wrongside_best.pt ensemble model
+        for mv in ml_violations:
+            violation_type_map = {
+                "wrong_direction": "WRONG SIDE",
+                "red_light_violation": "RED LIGHT",
+                "illegal_parking": "ILLEGAL PARKING",
+            }
+            vtype = violation_type_map.get(mv["class_name"])
+            if vtype:
+                # Only add if there isn't already a same-type violation nearby (IoU > 0.3)
+                is_duplicate = any(
+                    v["type"] == vtype and self.compute_iou(mv["box"], v.get("bbox", v.get("box", [0,0,0,0]))) > 0.3
+                    for v in violations
+                )
+                if not is_duplicate:
+                    violations.append({
+                        "type": vtype,
+                        "violation_type": vtype,
+                        "confidence": mv["confidence"],
+                        "bbox": mv["box"],
+                        "timestamp": now,
+                        "source": mv["source"],
+                    })
+
         violations = self.explanation_engine.generate_explanations_for_violations(violations)
+
+        if self.use_enhanced_models and self.enhanced_pipeline is not None:
+            try:
+                enhanced = self.enhanced_pipeline.process_image(
+                    original_image if isinstance(image, str) else image,
+                    confidence_threshold
+                )
+
+                # Enrich NO HELMET with UVH-26 vehicle classification
+                vehicle_classes = {v['class'] for v in enhanced.get('vehicles', [])}
+                if '2-wheeler' in vehicle_classes:
+                    # Ensure 2-wheelers without helmet are flagged
+                    has_no_helmet = any(
+                        v['type'] == 'NO HELMET' for v in violations
+                    )
+                    if not has_no_helmet:
+                        for veh in enhanced['vehicles']:
+                            if veh['class'] == '2-wheeler' and veh.get('requires_helmet'):
+                                plate = self.extract_plate_text(
+                                    original_image, veh['bbox']
+                                )
+                                violations.append({
+                                    'type': 'NO HELMET',
+                                    'violation_type': 'NO HELMET',
+                                    'confidence': veh['confidence'],
+                                    'bbox': veh['bbox'],
+                                    'plate_text': plate,
+                                    'timestamp': now,
+                                    'source': 'uvh26_enhanced',
+                                })
+
+                # Traffic sign violations from StreetSignSense
+                sign_classes = {s['class'].lower() for s in enhanced.get('traffic_signs', [])}
+                for sign_class in sign_classes:
+                    if 'no entry' in sign_class or 'wrong' in sign_class or 'no motor' in sign_class:
+                        violations.append({
+                            'type': 'WRONG SIDE',
+                            'violation_type': 'WRONG SIDE',
+                            'confidence': 0.9,
+                            'bbox': [0, 0, 0, 0],
+                            'timestamp': now,
+                            'source': 'streetsignsense_enhanced',
+                        })
+
+                # EULPR plate results - enrich existing violations
+                if enhanced.get('license_plates'):
+                    for plate_result in enhanced['license_plates']:
+                        if plate_result.get('text'):
+                            text = plate_result['text']
+                            for v in violations:
+                                if not v.get('plate_text') and v.get('type') != 'WRONG SIDE':
+                                    v['plate_text'] = text
+                                    v['ocr_confidence'] = plate_result.get('confidence', 0)
+
+                logger.info(
+                    "Enhanced pipeline: %d vehicles, %d signs, %d plates",
+                    len(enhanced.get('vehicles', [])),
+                    len(enhanced.get('traffic_signs', [])),
+                    len(enhanced.get('license_plates', [])),
+                )
+            except Exception as e:
+                logger.error("Enhanced pipeline error: %s", e)
 
         return violations, detections
 
@@ -367,51 +754,16 @@ class ViolationDetector:
                 raise FileNotFoundError(f"Could not read image: {image}")
         else:
             annotated = image.copy()
+        return draw_annotations(annotated, violations)
 
-        for violation in violations:
-            bbox = violation.get("bbox") or violation.get("box")
-            if not bbox or len(bbox) < 4:
-                continue
-            v_type = violation.get("type", "UNKNOWN")
-            confidence = violation.get("confidence", 0.0)
-            plate_text = violation.get("plate_text", None)
-
-            x1, y1, x2, y2 = map(int, bbox[:4])
-
-            cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 0, 255), 2)
-
-            label = f"{v_type}: {confidence:.2f}"
-
-            (text_w, text_h), _ = cv2.getTextSize(
-                label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2
-            )
-
-            cv2.rectangle(
-                annotated, (x1, y1 - text_h - 10), (x1 + text_w, y1), (0, 255, 0), -1
-            )
-            cv2.putText(
-                annotated,
-                label,
-                (x1, y1 - 5),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                (0, 0, 0),
-                2,
-            )
-
-            if plate_text:
-                plate_label = f"Plate: {plate_text}"
-                cv2.putText(
-                    annotated,
-                    plate_label,
-                    (x1, y2 + 25),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    (0, 255, 255),
-                    2,
-                )
-
-        return annotated
+    def draw_annotations(self, image, violations, detections=None):
+        if isinstance(image, str):
+            annotated = cv2.imread(image)
+            if annotated is None:
+                raise FileNotFoundError(f"Could not read image: {image}")
+        else:
+            annotated = image.copy()
+        return draw_annotations(annotated, violations, detections)
 
 
 _module_detector = None
@@ -440,26 +792,147 @@ def draw_violations(image, violations):
     return detector.draw_violations(image, violations)
 
 
+def draw_annotations(image, violations, detections=None):
+    """
+    Draw rich bounding boxes and annotations on image with per-type colors,
+    confidence bars, labels, plate text, fine amounts, and watermark.
+    """
+    if isinstance(image, str):
+        annotated = cv2.imread(image)
+        if annotated is None:
+            raise FileNotFoundError(f"Could not read image: {image}")
+    else:
+        annotated = image.copy()
+
+    height, width = annotated.shape[:2]
+
+    VIOLATION_COLORS = {
+        'NO_HELMET': (0, 0, 255),
+        'NO_SEATBELT': (0, 165, 255),
+        'TRIPLE_RIDING': (255, 0, 255),
+        'WRONG_SIDE': (255, 0, 0),
+        'STOP_LINE': (0, 255, 0),
+        'RED_LIGHT': (0, 0, 255),
+        'ILLEGAL_PARKING': (0, 255, 255),
+        'NO HELMET': (0, 0, 255),
+        'NO SEATBELT': (0, 165, 255),
+        'TRIPLE RIDING': (255, 0, 255),
+        'WRONG SIDE': (255, 0, 0),
+        'STOP LINE': (0, 255, 0),
+        'RED LIGHT': (0, 0, 255),
+        'ILLEGAL PARKING': (0, 255, 255),
+    }
+
+    DETECTION_COLORS = {
+        'vehicle': (0, 255, 255),
+        'car': (0, 255, 255),
+        'truck': (0, 255, 255),
+        'bus': (0, 255, 255),
+        'motorcycle': (0, 255, 255),
+        'person_rider': (0, 255, 0),
+        'rider': (0, 255, 0),
+        'person': (0, 255, 0),
+        'helmet': (255, 255, 0),
+        'seatbelt': (255, 0, 255),
+        'pedestrian': (255, 200, 0),
+    }
+
+    if detections:
+        for det in detections:
+            bbox = det.get('box', det.get('bbox', []))
+            if not bbox or len(bbox) < 4:
+                continue
+            x1, y1, x2, y2 = map(int, bbox[:4])
+            class_name = det.get('class_name', 'object')
+            conf = det.get('confidence', 0)
+            color = DETECTION_COLORS.get(class_name, (128, 128, 128))
+            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 1)
+            label = f"{class_name}: {conf:.2f}"
+            cv2.putText(annotated, label, (x1, y1 - 5),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
+
+    for violation in violations:
+        bbox = violation.get('bbox', violation.get('box', []))
+        if not bbox or len(bbox) < 4:
+            continue
+
+        x1, y1, x2, y2 = map(int, bbox[:4])
+        vtype = violation.get('type', violation.get('violation_type', 'UNKNOWN'))
+        confidence = violation.get('confidence', 0)
+        plate_text = violation.get('plate_text', '')
+        fine = violation.get('fine', 0)
+
+        color = VIOLATION_COLORS.get(vtype, (255, 255, 255))
+
+        cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 3)
+
+        bar_width = int((x2 - x1) * min(confidence, 1.0))
+        if bar_width > 0:
+            cv2.rectangle(annotated, (x1, y1 - 8), (x1 + bar_width, y1), color, -1)
+
+        label_parts = [f"{vtype.replace('_', ' ')}"]
+        if confidence > 0:
+            label_parts.append(f"{confidence*100:.1f}%")
+        label = ' | '.join(label_parts)
+
+        (text_w, text_h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+        label_y = y1 - 32
+        if label_y < 10:
+            label_y = y2 + 10
+
+        cv2.rectangle(annotated, (x1, label_y - text_h - 6),
+                      (x1 + text_w + 12, label_y + 4), color, -1)
+        cv2.putText(annotated, label, (x1 + 6, label_y + 4),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
+
+        if plate_text:
+            plate_label = f"Plate: {plate_text}"
+            plate_y = y2 + 22
+            (pw, ph), _ = cv2.getTextSize(plate_label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
+            cv2.rectangle(annotated, (x1, plate_y - ph - 4),
+                          (x1 + pw + 10, plate_y + 4), (0, 0, 0), -1)
+            cv2.putText(annotated, plate_label, (x1 + 5, plate_y + 4),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+
+        if fine > 0:
+            fine_label = f"Fine: Rs.{fine}"
+            fine_y = y2 + 46
+            (fw, fh), _ = cv2.getTextSize(fine_label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
+            cv2.rectangle(annotated, (x1, fine_y - fh - 4),
+                          (x1 + fw + 10, fine_y + 4), (0, 0, 0), -1)
+            cv2.putText(annotated, fine_label, (x1 + 5, fine_y + 4),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 165, 255), 2)
+
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    cv2.putText(annotated, f"Gridlock AI | {timestamp}", (10, height - 10),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+
+    count_label = f"{len(violations)} violation(s) detected"
+    cv2.putText(annotated, count_label, (10, 30),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255) if violations else (0, 255, 0), 2)
+
+    return annotated
+
+
 def extract_plate_text(image, vehicle_bbox):
     from license_plate_recognition import extract_plate_text as _lpr_extract
-
     return _lpr_extract(image, vehicle_bbox)
 
 
 def is_valid_plate(text):
     from license_plate_recognition import is_valid_plate as _lpr_valid
-
     return _lpr_valid(text)
 
 
 def generate_evidence_image(image, violations, detections=None):
-    annotated = draw_violations(image, violations)
+    annotated = draw_annotations(image, violations, detections)
     now = datetime.now().strftime("%Y%m%d_%H%M%S")
     evidence_dir = Path("evidence")
     evidence_dir.mkdir(parents=True, exist_ok=True)
     filename = f"violation_{now}.jpg"
     path = str(evidence_dir / filename)
     cv2.imwrite(path, annotated)
+    logger.info("Annotated image saved: %s", path)
     return path, filename
 
 
@@ -612,9 +1085,9 @@ class VideoProcessor:
             return results
 
 
-def detect_violations_json(image_path, confidence_threshold=0.5, enable_preprocessing=True):
+def detect_violations_json(image_path, confidence_threshold=0.5, enable_preprocessing=True, use_enhanced_models=False):
     try:
-        detector = ViolationDetector()
+        detector = ViolationDetector(use_enhanced_models=use_enhanced_models)
         violations, detections = detector.detect_violations(
             image_path,
             confidence_threshold=confidence_threshold,
@@ -683,16 +1156,22 @@ if __name__ == "__main__":
     parser.add_argument('--interval', type=int, default=30)
     parser.add_argument('--max-frames', type=int, default=100)
     parser.add_argument('--json', action='store_true', default=True)
+    parser.add_argument('--enhanced', action='store_true', default=False,
+                        help='Use enhanced models (VehicleNet UVH-26, StreetSignSense, EULPR)')
     args = parser.parse_args()
 
     if args.image:
         print(f"Processing image: {args.image}", file=sys.stderr)
-        result = detect_violations_json(args.image, args.confidence, args.preprocess)
+        if args.enhanced:
+            print("Using enhanced models (UVH-26 + StreetSignSense + EULPR)", file=sys.stderr)
+        result = detect_violations_json(args.image, args.confidence, args.preprocess, args.enhanced)
         print(json.dumps(result))
         sys.exit(0)
     elif args.video:
         print(f"Processing video: {args.video}", file=sys.stderr)
-        result_json = detect_violations_json(args.video, args.confidence, args.preprocess)
+        if args.enhanced:
+            print("Using enhanced models (UVH-26 + StreetSignSense + EULPR)", file=sys.stderr)
+        result_json = detect_violations_json(args.video, args.confidence, args.preprocess, args.enhanced)
         print(json.dumps(result_json))
         sys.exit(0)
 

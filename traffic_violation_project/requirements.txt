@@ -11,3 +11,6 @@ reportlab>=4.0.0
 matplotlib>=3.7.0
 scikit-learn>=1.2.0
 transformers>=4.30.0
+
+# Hugging Face model hub (for VehicleNet, StreetSignSense, EULPR)
+huggingface_hub>=0.20.0

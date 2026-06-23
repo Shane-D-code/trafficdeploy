@@ -18,6 +18,7 @@ const Detection: React.FC = () => {
   const [violations, setViolations] = useState<Violation[]>([]);
   const [selectedViolation, setSelectedViolation] = useState<Violation | null>(null);
   const [annotatedImageUrl, setAnnotatedImageUrl] = useState<string | null>(null);
+  const [useEnhanced, setUseEnhanced] = useState(false);
   const [confidence, setConfidence] = useState(0.25);
   const [preprocess, setPreprocess] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -37,18 +38,23 @@ const Detection: React.FC = () => {
 
   const detectMutation = useMutation({
     mutationFn: async (f: File) => {
+      console.log('[Detection] Starting upload for:', f.name);
       setError(null);
       setProgress(0);
       setAnnotatedImageUrl(null);
       pollingAttempts.current = 0;
       jobCompleted.current = false;
+      console.log('[Detection] Sending POST with confidence:', confidence, 'preprocess:', preprocess, 'useEnhanced:', useEnhanced);
       const resp = tab === 'video'
-        ? await detectionApi.detectVideo(f, confidence)
-        : await detectionApi.detectImage(f, confidence, preprocess);
+        ? await detectionApi.detectVideo(f, confidence, 30, 100, useEnhanced)
+        : await detectionApi.detectImage(f, confidence, preprocess, useEnhanced);
+      console.log('[Detection] POST response:', resp.status, resp.data);
       const { jobId } = resp.data;
+      console.log('[Detection] Got jobId:', jobId);
 
       const ws = getWebSocketClient();
       ws.connect();
+      console.log('[Detection] WebSocket client created, waiting for job completion');
 
       return new Promise<Violation[]>((resolve, reject) => {
         let done = false;
@@ -58,28 +64,33 @@ const Detection: React.FC = () => {
           jobCompleted.current = true;
           stopPolling();
           unsubWs();
+          console.log('[Detection] Finish called:', err ? 'ERROR: '+err : 'SUCCESS: '+violations?.length+' violations');
           if (err) reject(new Error(err));
           else resolve(violations || []);
         };
 
         const unsubWs = ws.onMessage((message: any) => {
           if (message.jobId !== jobId) return;
+          console.log('[Detection] WS message:', message.type, 'progress:', message.progress, 'jobId:', message.jobId);
           if (message.type === 'JOB_PROGRESS') {
             setProgress(message.progress);
           }
           if (message.type === 'JOB_COMPLETE') {
             const err = message.results?.error;
             if (err) {
+              console.log('[Detection] Job returned error:', err);
               finish(err);
               return;
             }
             const v = message.results?.violations || [];
+            console.log('[Detection] Job complete:', v.length, 'violations, annotated_url:', message.results?.annotated_image_url);
             setViolations(v);
             setAnnotatedImageUrl(message.results?.annotated_image_url || null);
             setProgress(100);
             finish(undefined, v);
           }
           if (message.type === 'JOB_ERROR') {
+            console.log('[Detection] Job error:', message.error);
             finish(message.error || 'Job failed');
           }
         });
@@ -89,27 +100,32 @@ const Detection: React.FC = () => {
 
           pollingAttempts.current++;
           if (pollingAttempts.current > 300) {
+            console.log('[Detection] Polling timeout after 300 attempts');
             finish('Processing timeout - job took too long');
             return;
           }
 
           try {
             const status = await detectionApi.getStatus(jobId);
+            console.log('[Detection] Poll attempt', pollingAttempts.current, 'status:', status.data.status);
             if (status.data.status === 'complete') {
               const resultErr = status.data.result?.error;
               if (resultErr) {
+                console.log('[Detection] Poll found error:', resultErr);
                 finish(resultErr);
                 return;
               }
+              console.log('[Detection] Poll found complete, violations:', status.data.result?.violations?.length, 'annotated_url:', status.data.result?.annotated_image_url);
               setAnnotatedImageUrl(status.data.result?.annotated_image_url || null);
               finish(undefined, status.data.result?.violations || []);
             } else if (status.data.status === 'error') {
+              console.log('[Detection] Poll found error status:', status.data.message);
               finish(status.data.message || 'Processing failed');
             } else {
               setProgress(status.data.progress || 0);
             }
-          } catch {
-            // retry on transient errors
+          } catch (pollErr) {
+            console.log('[Detection] Poll caught error:', pollErr);
           }
         }, 2000);
       });
@@ -248,6 +264,29 @@ const Detection: React.FC = () => {
                   <span className="text-xs text-[#6B7280] font-mono">Enable preprocessing</span>
                 </label>
 
+                <div className="flex items-center justify-between p-3" style={{ background: '#0B0F13', border: '1px solid rgba(58,67,79,0.3)' }}>
+                  <div>
+                    <p className="text-xs font-mono" style={{ color: useEnhanced ? '#A3FF3C' : '#6B7280' }}>Enhanced Models</p>
+                    <p className="text-[10px] text-[#3A434F] font-mono mt-0.5">VehicleNet + StreetSignSense + EULPR</p>
+                  </div>
+                  <button type="button" onClick={() => setUseEnhanced(!useEnhanced)}
+                    className="relative w-10 h-5 rounded-full transition-colors"
+                    style={{ background: useEnhanced ? '#A3FF3C' : '#3A434F' }}>
+                    <div className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform"
+                      style={{ left: useEnhanced ? '22px' : '2px' }} />
+                  </button>
+                </div>
+
+                {useEnhanced && (
+                  <div className="p-2 text-[10px] leading-relaxed font-mono"
+                    style={{ background: 'rgba(163,255,60,0.05)', border: '1px solid rgba(163,255,60,0.15)', color: '#9CA3AF' }}>
+                    <p style={{ color: '#A3FF3C' }}>Enhanced models active:</p>
+                    <p className="mt-1">VehicleNet UVH-26 (14 classes)</p>
+                    <p>StreetSignSense (63 signs)</p>
+                    <p>EULPR plate detection</p>
+                  </div>
+                )}
+
                 {detectMutation.isPending && (
                   <div className="space-y-1">
                     <div className="flex justify-between text-xs text-[#6B7280] font-mono">
@@ -260,7 +299,10 @@ const Detection: React.FC = () => {
                   </div>
                 )}
 
-                <HudButton className="w-full" variant="primary" onClick={() => file && detectMutation.mutate(file)} loading={detectMutation.isPending}>
+                <HudButton className="w-full" variant="primary" onClick={() => {
+                  console.log('[Detection] Button clicked, file:', file?.name);
+                  if (file) detectMutation.mutate(file);
+                }} loading={detectMutation.isPending}>
                   {detectMutation.isPending ? 'Processing...' : 'Detect Violations'}
                 </HudButton>
                 <HudButton className="w-full" variant="danger" onClick={() => {

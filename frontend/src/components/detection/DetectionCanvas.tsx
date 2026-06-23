@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import type { Violation } from '../../types';
 
 interface DetectionCanvasProps {
@@ -19,6 +19,8 @@ const CLASS_COLORS: Record<string, string> = {
 };
 
 const DetectionCanvas: React.FC<DetectionCanvasProps> = ({ image, violations, annotatedImageUrl, onViolationClick }) => {
+  const [imgNatural, setImgNatural] = useState({ w: 1, h: 1 });
+
   if (!image) {
     return (
       <div className="aspect-video rounded-lg flex items-center justify-center" style={{ background: '#0B0F13', border: '1px solid rgba(58,67,79,0.3)' }}>
@@ -37,7 +39,17 @@ const DetectionCanvas: React.FC<DetectionCanvasProps> = ({ image, violations, an
 
   return (
     <div className="relative inline-block w-full rounded-lg overflow-hidden scan-overlay">
-      <img src={displayImage} alt="Detection" className="w-full" />
+      <img
+        src={displayImage}
+        alt="Detection"
+        className="w-full"
+        onLoad={(e) => {
+          const img = e.target as HTMLImageElement;
+          if (img.naturalWidth && img.naturalHeight) {
+            setImgNatural({ w: img.naturalWidth, h: img.naturalHeight });
+          }
+        }}
+      />
       {!annotatedImageUrl && violations.map((v, i) => {
         const [x1, y1, x2, y2] = v.bbox;
         const color = CLASS_COLORS[v.type] || '#A3FF3C';
@@ -46,10 +58,10 @@ const DetectionCanvas: React.FC<DetectionCanvasProps> = ({ image, violations, an
             key={i}
             className="absolute cursor-pointer group hover:z-10"
             style={{
-              left: `${x1 * 100}%`,
-              top: `${y1 * 100}%`,
-              width: `${(x2 - x1) * 100}%`,
-              height: `${(y2 - y1) * 100}%`,
+              left: `${(x1 / imgNatural.w) * 100}%`,
+              top: `${(y1 / imgNatural.h) * 100}%`,
+              width: `${((x2 - x1) / imgNatural.w) * 100}%`,
+              height: `${((y2 - y1) / imgNatural.h) * 100}%`,
             }}
             onClick={() => onViolationClick?.(v)}
           >

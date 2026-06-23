@@ -454,6 +454,34 @@ class EvidenceGenerator:
             logger.error(f"Challan generation error: {e}")
             return None
 
+    def generate_evidence_preview(self, image: np.ndarray, violations: list) -> dict:
+        """Generate preview data with annotations and fine calculation"""
+        annotated = self.draw_annotations(image, violations)
+        total_fine = sum(self._get_fine_amount(v.get('type', v.get('violation_type', ''))) for v in violations)
+        return {
+            'violations': violations,
+            'total_fine': total_fine,
+            'violation_count': len(violations),
+            'severity': self._calculate_severity(violations),
+            'annotated_image': annotated.tolist() if isinstance(annotated, np.ndarray) else None
+        }
+
+    def _calculate_severity(self, violations: list) -> str:
+        severities = {
+            'NO_HELMET': 2, 'NO HELMET': 2,
+            'NO_SEATBELT': 2, 'NO SEATBELT': 2,
+            'TRIPLE_RIDING': 3, 'TRIPLE RIDING': 3,
+            'WRONG_SIDE': 4, 'WRONG SIDE': 4,
+            'STOP_LINE': 3, 'STOP LINE': 3,
+            'RED_LIGHT': 5, 'RED LIGHT': 5,
+            'ILLEGAL_PARKING': 1, 'ILLEGAL PARKING': 1,
+        }
+        max_sev = max((severities.get(v.get('type', v.get('violation_type', '')), 0) for v in violations), default=0)
+        if max_sev >= 4: return 'critical'
+        if max_sev >= 3: return 'high'
+        if max_sev >= 2: return 'medium'
+        return 'low'
+
     def _get_fine_amount(self, violation_type: str) -> int:
         fines = {
             'NO_HELMET': 1000,

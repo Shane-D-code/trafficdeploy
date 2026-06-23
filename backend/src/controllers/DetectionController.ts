@@ -13,10 +13,22 @@ export const detectImage = async (req: Request, res: Response): Promise<void> =>
     const jobId = uuidv4();
     const confidence = parseFloat(req.body.confidence) || 0.25;
     const preprocess = req.body.preprocess !== 'false';
+    const useEnhanced = req.body.enhanced === 'true' || req.body.enhanced === true;
 
-    detectionService.processImage(jobId, file.path, { confidenceThreshold: confidence, enablePreprocessing: preprocess });
+    detectionService.processImage(jobId, file.path, {
+      confidenceThreshold: confidence,
+      enablePreprocessing: preprocess,
+      useEnhancedModels: useEnhanced
+    });
 
-    res.json({ success: true, jobId, message: 'Image processing started' });
+    res.json({
+      success: true,
+      jobId,
+      enhanced: useEnhanced,
+      message: useEnhanced
+        ? 'Image processing started with enhanced models (VehicleNet + StreetSignSense + EULPR)'
+        : 'Image processing started'
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -31,10 +43,23 @@ export const detectVideo = async (req: Request, res: Response): Promise<void> =>
     const confidence = parseFloat(req.body.confidence) || 0.25;
     const frameInterval = parseInt(req.body.frameInterval) || 30;
     const maxFrames = parseInt(req.body.maxFrames) || 100;
+    const useEnhanced = req.body.enhanced === 'true' || req.body.enhanced === true;
 
-    detectionService.processVideo(jobId, file.path, { confidenceThreshold: confidence, frameInterval, maxFrames });
+    detectionService.processVideo(jobId, file.path, {
+      confidenceThreshold: confidence,
+      frameInterval,
+      maxFrames,
+      useEnhancedModels: useEnhanced
+    });
 
-    res.json({ success: true, jobId, message: 'Video processing started' });
+    res.json({
+      success: true,
+      jobId,
+      enhanced: useEnhanced,
+      message: useEnhanced
+        ? 'Video processing started with enhanced models (VehicleNet + StreetSignSense + EULPR)'
+        : 'Video processing started'
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }

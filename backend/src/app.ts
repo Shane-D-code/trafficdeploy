@@ -37,6 +37,8 @@ const annotatedDir = path.resolve(__dirname, '../annotated');
 if (!fs.existsSync(annotatedDir)) fs.mkdirSync(annotatedDir, { recursive: true });
 app.use('/annotated', express.static(annotatedDir));
 
+app.use('/uploads', express.static(uploadDir));
+
 app.use('/api', apiRoutes);
 
 app.get('/', (_req, res) => {

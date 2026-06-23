@@ -6,6 +6,7 @@ import liveRoutes from './live';
 import evidenceRoutes from './evidence';
 import evaluationRoutes from './evaluation';
 import insightsRoutes from './insights';
+import gisRoutes from './gis';
 import settingsRoutes from './settings';
 import exportRoutes from './export';
 
@@ -18,6 +19,7 @@ router.use('/live', liveRoutes);
 router.use('/evidence', evidenceRoutes);
 router.use('/evaluation', evaluationRoutes);
 router.use('/insights', insightsRoutes);
+router.use('/gis', gisRoutes);
 router.use('/settings', settingsRoutes);
 router.use('/export', exportRoutes);
 

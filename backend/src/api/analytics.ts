@@ -1,5 +1,5 @@
 import express from 'express';
-import { getStats, getViolations, getCompliance, getViolationLocations, updateReviewStatus } from '../controllers/AnalyticsController';
+import { getStats, getViolations, getCompliance, getViolationLocations, updateReviewStatus, getIncidents, reviewIncident } from '../controllers/AnalyticsController';
 import { DatabaseService } from '../services/DatabaseService';
 
 const router = express.Router();
@@ -49,6 +49,9 @@ router.delete('/violations/:id/false-positive', async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+router.get('/incidents', getIncidents);
+router.post('/incidents/:incidentId/review', reviewIncident);
 
 router.get('/metrics', async (_req, res) => {
   try {

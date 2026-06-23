@@ -1,31 +1,88 @@
 import { spawn } from 'child_process';
 import path from 'path';
+import fs from 'fs';
+import { EventEmitter } from 'events';
 
-export class PythonBridge {
+export class PythonBridge extends EventEmitter {
   private pythonPath: string;
   private modulePath: string;
 
   constructor() {
-    const defaultPython = process.platform === 'win32' ? 'python' : 'python3';
-    this.pythonPath = process.env.PYTHON_PATH || defaultPython;
-    this.modulePath = path.resolve(__dirname, process.env.PYTHON_MODULE_PATH || '../../../traffic_violation_project');
-    this._validatePaths();
+    super();
+    this.pythonPath = this.findPythonPath();
+    this.modulePath = this.findModulePath();
+
+    console.log(`[PythonBridge] Python: ${this.pythonPath}`);
+    console.log(`[PythonBridge] Module: ${this.modulePath}`);
+
+    if (!fs.existsSync(this.modulePath)) {
+      throw new Error(`Python module path not found: ${this.modulePath}`);
+    }
   }
 
-  private _validatePaths(): void {
-    const pythonExists = (() => {
-      try { require('child_process').execSync(`${this.pythonPath} --version`, { stdio: 'pipe' }); return true; }
-      catch { return false; }
-    })();
-    if (!pythonExists) console.error(`[PythonBridge] Python binary not found at: ${this.pythonPath}. Set PYTHON_PATH in .env`);
-
-    try {
-      const fs = require('fs');
-      if (!fs.existsSync(this.modulePath)) console.error(`[PythonBridge] Module path not found: ${this.modulePath}`);
-    } catch {}
+  private findPythonPath(): string {
+    const paths = [
+      process.env.PYTHON_PATH,
+      '/Users/shantanu/Gridlock/traffic_violation_project/venv/bin/python3',
+      '/usr/bin/python3',
+      '/opt/homebrew/bin/python3',
+      'python3',
+      'python'
+    ];
+    for (const p of paths) {
+      if (p && (p === 'python3' || p === 'python' || fs.existsSync(p))) {
+        // For bare names, check they're on PATH
+        if (p === 'python3' || p === 'python') {
+          try {
+            require('child_process').execSync(`${p} --version`, { stdio: 'pipe' });
+            return p;
+          } catch { continue; }
+        }
+        return p;
+      }
+    }
+    return 'python3';
   }
 
-  private _spawnPython(args: string[], mode: 'image' | 'video'): Promise<any> {
+  private findModulePath(): string {
+    const paths = [
+      process.env.PYTHON_MODULE_PATH,
+      path.resolve(__dirname, '../../../traffic_violation_project'),
+      path.resolve(__dirname, '../../../../traffic_violation_project'),
+      path.join(process.cwd(), 'traffic_violation_project')
+    ];
+    for (const p of paths) {
+      if (p && fs.existsSync(p)) {
+        return p;
+      }
+    }
+    throw new Error('Could not find traffic_violation_project directory');
+  }
+
+  detectImage(imagePath: string, options: { confidenceThreshold: number; enablePreprocessing: boolean; useEnhancedModels?: boolean }): Promise<any> {
+    const args = [
+      '--image', imagePath,
+      '--confidence', String(options.confidenceThreshold),
+      '--preprocess', String(options.enablePreprocessing !== false),
+      '--json'
+    ];
+    if (options.useEnhancedModels) args.push('--enhanced');
+    return this.runPython(args);
+  }
+
+  detectVideo(videoPath: string, options: { confidenceThreshold: number; frameInterval: number; maxFrames: number; useEnhancedModels?: boolean }): Promise<any> {
+    const args = [
+      '--video', videoPath,
+      '--confidence', String(options.confidenceThreshold),
+      '--interval', String(options.frameInterval),
+      '--max-frames', String(options.maxFrames),
+      '--json'
+    ];
+    if (options.useEnhancedModels) args.push('--enhanced');
+    return this.runPython(args);
+  }
+
+  private async runPython(args: string[]): Promise<any> {
     return new Promise((resolve, reject) => {
       const script = path.join(this.modulePath, 'violation_detector.py');
       const fullArgs = [script, ...args];
@@ -33,17 +90,19 @@ export class PythonBridge {
 
       console.log(`[PythonBridge] Spawning: ${this.pythonPath} ${fullArgs.join(' ')}`);
       console.log(`[PythonBridge] CWD: ${this.modulePath}`);
-      console.log(`[PythonBridge] Mode: ${mode}`);
 
-      const proc = spawn(this.pythonPath, fullArgs, { cwd: this.modulePath });
+      const proc = spawn(this.pythonPath, fullArgs, {
+        cwd: this.modulePath,
+        env: { ...process.env, PYTHONPATH: this.modulePath }
+      });
 
       let stdout = '';
       let stderr = '';
 
       const timer = setTimeout(() => {
-        console.error(`[PythonBridge] TIMEOUT after ${timeoutMs}ms for ${mode} job`);
+        console.error(`[PythonBridge] TIMEOUT after ${timeoutMs}ms`);
         proc.kill('SIGTERM');
-        reject(new Error(`Python ${mode} detection timed out after ${timeoutMs / 1000}s`));
+        reject(new Error(`Python detection timed out after ${timeoutMs / 1000}s`));
       }, timeoutMs);
 
       proc.stdout.on('data', (data: Buffer) => {
@@ -62,7 +121,7 @@ export class PythonBridge {
         clearTimeout(timer);
         console.error(`[PythonBridge] Spawn error: ${err.message}`);
         if (err.message.includes('ENOENT')) {
-          reject(new Error(`Python binary '${this.pythonPath}' not found. Check PYTHON_PATH in .env or install Python`));
+          reject(new Error(`Python binary '${this.pythonPath}' not found. Check PYTHON_PATH or install Python`));
         } else {
           reject(new Error(`Python spawn failed: ${err.message}`));
         }
@@ -73,14 +132,15 @@ export class PythonBridge {
         console.log(`[PythonBridge] Process exited with code ${code}`);
 
         if (code !== 0) {
-          const exitError = stderr.trim() || stdout.trim() || 'Unknown Python error (exit code ' + code + ')';
+          const exitError = stderr.trim() || stdout.trim() || `Unknown Python error (exit code ${code})`;
           console.error(`[PythonBridge] Non-zero exit: ${exitError}`);
+          this.emit('error', { code, stderr, stdout });
           reject(new Error(`Python error (exit ${code}): ${exitError.slice(0, 500)}`));
           return;
         }
 
         if (!stdout.trim()) {
-          console.error(`[PythonBridge] Empty stdout from Python`);
+          console.error(`[PythonBridge] Empty stdout`);
           reject(new Error('Python produced no output'));
           return;
         }
@@ -92,58 +152,38 @@ export class PythonBridge {
               console.error(`[PythonBridge] Python returned error: ${json.error}`);
               reject(new Error(`Python detection error: ${json.error}`));
             } else {
+              this.emit('result', json);
               resolve(json);
             }
           } else {
-            console.error(`[PythonBridge] No JSON found in output. Raw stdout:\n${stdout.slice(0, 1000)}`);
+            const snippet = stdout.slice(0, 1000);
+            console.error(`[PythonBridge] No JSON found:\n${snippet}`);
             reject(new Error('No valid JSON found in Python output'));
           }
         } catch (error: any) {
-          console.error(`[PythonBridge] JSON parse error: ${error.message}`);
-          console.error(`[PythonBridge] Raw stdout (first 2000 chars):\n${stdout.slice(0, 2000)}`);
-          if (stderr) console.error(`[PythonBridge] Raw stderr:\n${stderr}`);
+          console.error(`[PythonBridge] Parse error: ${error.message}`);
+          console.error(`[PythonBridge] stdout:\n${stdout.slice(0, 2000)}`);
+          if (stderr) console.error(`[PythonBridge] stderr:\n${stderr}`);
           reject(new Error(`Failed to parse Python output: ${error.message}`));
         }
       });
     });
   }
 
-  detectImage(imagePath: string, options: { confidenceThreshold: number; enablePreprocessing: boolean }): Promise<any> {
-    const args = [
-      '--image', imagePath,
-      '--confidence', String(options.confidenceThreshold),
-      '--preprocess', String(options.enablePreprocessing !== false),
-      '--json'
-    ];
-    return this._spawnPython(args, 'image');
-  }
-
-  detectVideo(videoPath: string, options: { confidenceThreshold: number; frameInterval: number; maxFrames: number }): Promise<any> {
-    const args = [
-      '--video', videoPath,
-      '--confidence', String(options.confidenceThreshold),
-      '--interval', String(options.frameInterval),
-      '--max-frames', String(options.maxFrames),
-      '--json'
-    ];
-    return this._spawnPython(args, 'video');
-  }
-
   private extractJSON(text: string): any {
     const trimmed = text.trim();
+    // Try direct parse
     try {
       return JSON.parse(trimmed);
-    } catch (e1) {
-      console.log(`[PythonBridge] Direct JSON parse failed, trying regex fallback...`);
-    }
+    } catch {}
+    // Try regex extraction
     try {
       const jsonMatch = trimmed.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
-        try {
-          return JSON.parse(jsonMatch[0]);
-        } catch {}
+        try { return JSON.parse(jsonMatch[0]); } catch {}
       }
     } catch {}
+    // Try brace-matching extraction
     let inString = false;
     let escape = false;
     let braceCount = 0;
@@ -167,7 +207,7 @@ export class PythonBridge {
     if (start !== -1 && end !== -1) {
       try { return JSON.parse(trimmed.substring(start, end + 1)); } catch {}
     }
-    console.error(`[PythonBridge] All JSON parsing strategies failed for input (first 500 chars): ${trimmed.slice(0, 500)}`);
+    console.error(`[PythonBridge] All JSON parsing strategies failed (first 500 chars): ${trimmed.slice(0, 500)}`);
     return null;
   }
 }

@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import path from 'path';
 import { PythonBridge } from '../python-bridge/bridge';
 import { DatabaseService } from './DatabaseService';
 import { getWebSocketServer } from '../websocket/WebSocketServer';
@@ -40,7 +41,7 @@ export class DetectionService extends EventEmitter {
     this.jobs = new Map();
   }
 
-  async processImage(jobId: string, imagePath: string, options: { confidenceThreshold: number; enablePreprocessing: boolean }): Promise<void> {
+  async processImage(jobId: string, imagePath: string, options: { confidenceThreshold: number; enablePreprocessing: boolean; useEnhancedModels?: boolean }): Promise<void> {
     const now = new Date().toISOString();
     const jobEntry: JobEntry = {
       id: jobId,
@@ -62,21 +63,30 @@ export class DetectionService extends EventEmitter {
 
       jobEntry.status = 'complete';
       jobEntry.progress = 100;
-      jobEntry.result = result;
       jobEntry.updatedAt = new Date().toISOString();
+
+      const annotatedImagePath = result.annotated_image_path || null;
+      const annotatedImageUrl = annotatedImagePath ? `/evidence/${path.basename(annotatedImagePath)}` : null;
+      const originalImageUrl = `/uploads/${path.basename(imagePath)}`;
+
+      jobEntry.result = { ...result, annotated_image_url: annotatedImageUrl, annotated_image_path: annotatedImagePath };
       this.jobs.set(jobId, jobEntry);
       await this.db.updateJob(jobEntry).catch(e => console.error('Failed to update job:', e));
 
       let savedCount = 0;
-      const annotatedImagePath = result.annotated_image_path || null;
-      // Divide total inference time evenly across violations so per-violation queries are meaningful
       const perViolationMs = result.violations.length > 0
         ? Math.round(inferenceTimeMs / result.violations.length)
         : inferenceTimeMs;
       for (const violation of result.violations) {
         try {
           const meta = JSON.stringify({ inference_time_ms: perViolationMs });
-          await this.db.saveViolation({ ...violation, job_id: jobId, annotated_image_path: annotatedImagePath, metadata: meta });
+          await this.db.saveViolation({
+            ...violation,
+            job_id: jobId,
+            image_path: originalImageUrl,
+            annotated_image_path: annotatedImagePath,
+            metadata: meta
+          });
           savedCount++;
           getWS().broadcastViolation({ ...violation, jobId, annotatedImagePath, savedAt: new Date().toISOString() });
         } catch (error) {
@@ -86,6 +96,7 @@ export class DetectionService extends EventEmitter {
 
       getWS().broadcastJobComplete(jobId, {
         ...result,
+        annotated_image_url: annotatedImageUrl,
         savedCount,
         totalViolations: result.violations.length
       });
@@ -105,7 +116,7 @@ export class DetectionService extends EventEmitter {
     }
   }
 
-  async processVideo(jobId: string, videoPath: string, options: { confidenceThreshold: number; frameInterval: number; maxFrames: number }): Promise<void> {
+  async processVideo(jobId: string, videoPath: string, options: { confidenceThreshold: number; frameInterval: number; maxFrames: number; useEnhancedModels?: boolean }): Promise<void> {
     const now = new Date().toISOString();
     const jobEntry: JobEntry = {
       id: jobId,
@@ -134,13 +145,20 @@ export class DetectionService extends EventEmitter {
 
       let savedCount = 0;
       const annotatedImagePath = result.annotated_image_path || null;
+      const originalImageUrl = `/uploads/${path.basename(videoPath)}`;
       const violationCount = result.violations?.length || 1;
       const perViolationMs = Math.round(inferenceTimeMs / violationCount);
       if (result.violations) {
         for (const violation of result.violations) {
           try {
             const meta = JSON.stringify({ inference_time_ms: perViolationMs });
-            await this.db.saveViolation({ ...violation, job_id: jobId, annotated_image_path: annotatedImagePath, metadata: meta });
+            await this.db.saveViolation({
+              ...violation,
+              job_id: jobId,
+              image_path: originalImageUrl,
+              annotated_image_path: annotatedImagePath,
+              metadata: meta
+            });
             savedCount++;
             getWS().broadcastViolation({ ...violation, jobId, annotatedImagePath, savedAt: new Date().toISOString() });
           } catch (error) {
