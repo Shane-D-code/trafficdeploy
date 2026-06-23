@@ -38,11 +38,6 @@ services:
 
     healthCheckPath: /api/health
 
-    disk:
-      name: gridlock-data
-      mountPath: /opt/render/project/src/data
-      sizeGB: 1
-
   - type: web
     name: gridlock-frontend
     runtime: node
