@@ -1,10 +1,14 @@
 services:
   - type: web
     name: gridlock-backend
-    runtime: docker
+    runtime: node
     plan: free
     region: oregon
-    dockerfilePath: ./Dockerfile
+    rootDir: backend
+    buildCommand: |
+      npm install
+      npm run build
+    startCommand: node dist/app.js
     envVars:
       - key: NODE_ENV
         value: production
@@ -35,5 +39,3 @@ services:
     envVars:
       - key: VITE_API_URL
         value: https://gridlock-backend.onrender.com/api
-      - key: VITE_WS_URL
-        value: wss://gridlock-backend.onrender.com/ws
