@@ -1,16 +1,39 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { HudCard } from '../components/common/HudCard';
 import { HudButton } from '../components/common/HudButton';
 import { Save, Trash2 } from 'lucide-react';
+import { apiClient } from '../api/client';
+
+const DEFAULT_SETTINGS = {
+  confidenceThreshold: 0.25,
+  preprocessing: true,
+  autoSaveEvidence: true,
+  notifications: true,
+  fps: 30,
+};
 
 const Settings: React.FC = () => {
-  const [settings, setSettings] = useState({
-    confidenceThreshold: 0.5,
-    preprocessing: true,
-    autoSaveEvidence: true,
-    notifications: true,
-    fps: 30,
-  });
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    apiClient.get('/settings').then(r => {
+      if (r.data?.data && Object.keys(r.data.data).length) {
+        setSettings(prev => ({ ...prev, ...r.data.data }));
+      }
+    }).catch(() => {});
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await apiClient.put('/settings', settings);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch {}
+    setSaving(false);
+  };
 
   return (
     <>
@@ -19,8 +42,8 @@ const Settings: React.FC = () => {
           <h1 className="text-lg font-heading text-[#EAEAEA] tracking-widest">SETTINGS</h1>
           <p className="text-xs text-[#6B7280] font-mono mt-0.5 tracking-wider">SYSTEM CONFIGURATION</p>
         </div>
-        <HudButton variant="primary" onClick={() => alert('Settings saved')}>
-          <Save className="w-4 h-4" /> Save
+        <HudButton variant="primary" onClick={handleSave} loading={saving}>
+          <Save className="w-4 h-4" /> {saved ? 'Saved!' : 'Save'}
         </HudButton>
       </div>
 

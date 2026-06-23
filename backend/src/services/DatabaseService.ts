@@ -76,6 +76,10 @@ export class DatabaseService {
           this.db.run("CREATE INDEX IF NOT EXISTS idx_job_id ON violations(job_id)", (err) => res());
         }))
         .then(() => run('CREATE INDEX IF NOT EXISTS idx_job_status ON jobs(status)'))
+        .then(() => run(`CREATE TABLE IF NOT EXISTS settings (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        )`))
         .then(() => resolve())
         .catch(reject);
     });
@@ -293,32 +297,65 @@ export class DatabaseService {
                   const oneHourAgo = new Date(Date.now() - 3600000).toISOString();
 
                   this.db.all(
-                    `SELECT confidence, timestamp FROM violations ${baseWhere} AND timestamp >= ? ORDER BY timestamp`,
+                    `SELECT confidence, timestamp, metadata FROM violations ${baseWhere} AND timestamp >= ? ORDER BY timestamp`,
                     [oneHourAgo],
                     (err, recentRows: any[]) => {
                       if (err) return reject(err);
                       const recentItems = recentRows || [];
 
-                      const inferenceTimes = recentItems.map((r: any, i: number) => ({
-                        time: r.timestamp,
-                        p95: 100 + Math.random() * 50,
-                        p99: 150 + Math.random() * 80,
-                      }));
+                      // --- Real inference times from stored metadata ---
+                      const inferenceTimes: number[] = recentItems
+                        .map((r: any) => {
+                          try {
+                            const meta = typeof r.metadata === 'string' ? JSON.parse(r.metadata) : r.metadata;
+                            return meta?.inference_time_ms ?? null;
+                          } catch { return null; }
+                        })
+                        .filter((t: number | null): t is number => t !== null && t > 0);
 
+                      const sortedTimes = [...inferenceTimes].sort((a, b) => a - b);
+                      const avgTime = sortedTimes.length > 0
+                        ? sortedTimes.reduce((a, b) => a + b, 0) / sortedTimes.length
+                        : 0;
+                      const p95Time = sortedTimes.length > 0
+                        ? sortedTimes[Math.min(Math.floor(sortedTimes.length * 0.95), sortedTimes.length - 1)]
+                        : 0;
+                      const p99Time = sortedTimes.length > 0
+                        ? sortedTimes[Math.min(Math.floor(sortedTimes.length * 0.99), sortedTimes.length - 1)]
+                        : 0;
+
+                      // Build time-series buckets (group by minute)
+                      const timeSeriesMap: Record<string, number[]> = {};
+                      for (const r of recentItems) {
+                        const bucket = r.timestamp ? r.timestamp.substring(0, 16) : 'unknown';
+                        if (!timeSeriesMap[bucket]) timeSeriesMap[bucket] = [];
+                        try {
+                          const meta = typeof r.metadata === 'string' ? JSON.parse(r.metadata) : r.metadata;
+                          if (meta?.inference_time_ms) timeSeriesMap[bucket].push(meta.inference_time_ms);
+                        } catch {}
+                      }
+                      const inferenceSeries = Object.entries(timeSeriesMap)
+                        .sort(([a], [b]) => a.localeCompare(b))
+                        .map(([time, times]) => {
+                          const sorted = [...times].sort((a, b) => a - b);
+                          return {
+                            time,
+                            p95: sorted[Math.min(Math.floor(sorted.length * 0.95), sorted.length - 1)] ?? 0,
+                            p99: sorted[Math.min(Math.floor(sorted.length * 0.99), sorted.length - 1)] ?? 0,
+                          };
+                        });
+
+                      // Confidence distribution from all recent items
                       const confidences = recentItems.map((r: any) => r.confidence || 0);
-                      const sorted = [...confidences].sort((a, b) => a - b);
-                      const p95Time = sorted.length > 0 ? sorted[Math.floor(sorted.length * 0.95)] * 200 + 50 : 150;
-                      const p99Time = sorted.length > 0 ? sorted[Math.floor(sorted.length * 0.99)] * 200 + 80 : 250;
-
                       const binSize = 0.1;
                       const confidenceDistribution: { bin: string; count: number }[] = [];
                       for (let b = 0; b <= 0.9; b += binSize) {
                         const binStart = b;
                         const binEnd = b + binSize;
-                        const count = sorted.filter(c => c >= binStart && c < binEnd).length;
+                        const count = confidences.filter((c: number) => c >= binStart && c < binEnd).length;
                         confidenceDistribution.push({
                           bin: `${(binStart * 100).toFixed(0)}-${(binEnd * 100).toFixed(0)}%`,
-                          count
+                          count,
                         });
                       }
 
@@ -333,11 +370,11 @@ export class DatabaseService {
                         avgConfidence: Math.round(avgConfidence * 100) / 100,
                         byType,
                         mapPerClass,
-                        inferenceTimeMs: Math.round(p95Time * 100) / 100,
+                        inferenceTimeMs: Math.round(avgTime * 100) / 100,
                         p95InferenceTime: Math.round(p95Time * 100) / 100,
                         p99InferenceTime: Math.round(p99Time * 100) / 100,
-                        fps: Math.round((1000 / Math.max(p95Time, 1)) * 10) / 10,
-                        inferenceTimeSeries: inferenceTimes,
+                        fps: Math.round((p95Time > 0 ? 1000 / p95Time : 0) * 10) / 10,
+                        inferenceTimeSeries: inferenceSeries,
                         confidenceDistribution,
                       });
                     }
@@ -393,6 +430,42 @@ export class DatabaseService {
           else resolve();
         }
       );
+    }));
+  }
+
+  getSettings(): Promise<Record<string, any>> {
+    return this.waitForReady().then(() => new Promise((resolve, reject) => {
+      this.db.all('SELECT key, value FROM settings', (err, rows: any[]) => {
+        if (err) return reject(err);
+        const out: Record<string, any> = {};
+        for (const r of (rows || [])) {
+          try { out[r.key] = JSON.parse(r.value); } catch { out[r.key] = r.value; }
+        }
+        resolve(out);
+      });
+    }));
+  }
+
+  saveSettings(settings: Record<string, any>): Promise<void> {
+    return this.waitForReady().then(() => new Promise((resolve, reject) => {
+      const stmt = this.db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+      const entries = Object.entries(settings);
+      let i = 0;
+      const next = () => {
+        if (i >= entries.length) { stmt.finalize(); return resolve(); }
+        const [k, v] = entries[i++];
+        stmt.run([k, JSON.stringify(v)], (err: Error | null) => err ? (stmt.finalize(), reject(err)) : next());
+      };
+      next();
+    }));
+  }
+
+  deleteViolation(id: string): Promise<void> {
+    return this.waitForReady().then(() => new Promise((resolve, reject) => {
+      this.db.run('DELETE FROM violations WHERE id = ?', [id], function (err) {
+        if (err) reject(err);
+        else resolve();
+      });
     }));
   }
 

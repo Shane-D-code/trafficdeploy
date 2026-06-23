@@ -13,7 +13,7 @@ mkdir -p "${PROJECT_DIR}/datasets/plate_data/labels"
 mkdir -p "${PROJECT_DIR}/models"
 
 echo "==> Creating placeholder Python files"
-touch "${PROJECT_DIR}/app.py" "${PROJECT_DIR}/violation_detector.py" "${PROJECT_DIR}/utils.py"
+touch "${PROJECT_DIR}/violation_detector.py" "${PROJECT_DIR}/utils.py"
 
 echo "==> Creating requirements.txt"
 cat > "${PROJECT_DIR}/requirements.txt" <<'EOF'
@@ -22,7 +22,6 @@ opencv-python==4.10.0.84
 Pillow==10.4.0
 numpy==1.26.4
 easyocr==1.7.1
-streamlit==1.36.0
 pandas==2.2.2
 torch==2.3.1
 torchvision==0.18.1

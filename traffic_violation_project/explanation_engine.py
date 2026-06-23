@@ -36,6 +36,16 @@ class ExplanationEngine:
                 "The vehicle proceeded through the intersection despite a red signal.",
                 "Red light violation detected - vehicle crossed during red phase."
             ],
+            'RED_SIGNAL_OVERRAKING': [
+                "Vehicle crossed the stop line while the signal was red with {conf:.1f}% confidence.",
+                "Red signal overraking detected - vehicle proceeded past the stop line during red phase.",
+                "The vehicle ignored the red signal and crossed the stop line with {conf:.1f}% certainty."
+            ],
+            'STOP_LINE_CROSSING': [
+                "Vehicle crossed the stop line without stopping with {conf:.1f}% confidence.",
+                "The vehicle failed to stop at the designated stop line.",
+                "Stop line violation - vehicle continued past the stop line."
+            ],
             'WRONG_SIDE': [
                 "Vehicle detected driving on the wrong side of the road with {conf:.1f}% confidence.",
                 "The vehicle is traveling against the designated traffic flow direction.",

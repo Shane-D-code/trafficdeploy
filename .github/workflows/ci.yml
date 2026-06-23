@@ -54,10 +54,4 @@ jobs:
       - run: flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
       - run: pytest tests/ -v --if-present
 
-  docker-build:
-    needs: [test-backend, test-frontend, test-python]
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    steps:
-      - uses: actions/checkout@v3
-      - run: docker build -t gridlock .
+

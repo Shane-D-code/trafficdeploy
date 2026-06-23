@@ -10,3 +10,4 @@ uploads/*
 !uploads/.gitkeep
 data/*
 !data/.gitkeep
+traffic_violation_project/evidence/

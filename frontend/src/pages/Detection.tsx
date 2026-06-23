@@ -8,15 +8,17 @@ import DetectionCanvas from '../components/detection/DetectionCanvas';
 import { DetectionPanel } from '../components/detection/DetectionPanel';
 import { ViolationList } from '../components/detection/ViolationList';
 import { HudSpinner } from '../components/common/HudSpinner';
-import { Upload, Image as ImageIcon, AlertCircle } from 'lucide-react';
+import { Upload, Image as ImageIcon, Video, AlertCircle } from 'lucide-react';
 import type { Violation } from '../types';
 
 const Detection: React.FC = () => {
+  const [tab, setTab] = useState<'image' | 'video'>('image');
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [violations, setViolations] = useState<Violation[]>([]);
   const [selectedViolation, setSelectedViolation] = useState<Violation | null>(null);
-  const [confidence, setConfidence] = useState(0.5);
+  const [annotatedImageUrl, setAnnotatedImageUrl] = useState<string | null>(null);
+  const [confidence, setConfidence] = useState(0.25);
   const [preprocess, setPreprocess] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -37,9 +39,12 @@ const Detection: React.FC = () => {
     mutationFn: async (f: File) => {
       setError(null);
       setProgress(0);
+      setAnnotatedImageUrl(null);
       pollingAttempts.current = 0;
       jobCompleted.current = false;
-      const resp = await detectionApi.detectImage(f, confidence, preprocess);
+      const resp = tab === 'video'
+        ? await detectionApi.detectVideo(f, confidence)
+        : await detectionApi.detectImage(f, confidence, preprocess);
       const { jobId } = resp.data;
 
       const ws = getWebSocketClient();
@@ -63,9 +68,16 @@ const Detection: React.FC = () => {
             setProgress(message.progress);
           }
           if (message.type === 'JOB_COMPLETE') {
-            setViolations(message.results?.violations || message.result?.violations || []);
+            const err = message.results?.error;
+            if (err) {
+              finish(err);
+              return;
+            }
+            const v = message.results?.violations || [];
+            setViolations(v);
+            setAnnotatedImageUrl(message.results?.annotated_image_url || null);
             setProgress(100);
-            finish(undefined, message.results?.violations || message.result?.violations || []);
+            finish(undefined, v);
           }
           if (message.type === 'JOB_ERROR') {
             finish(message.error || 'Job failed');
@@ -84,6 +96,12 @@ const Detection: React.FC = () => {
           try {
             const status = await detectionApi.getStatus(jobId);
             if (status.data.status === 'complete') {
+              const resultErr = status.data.result?.error;
+              if (resultErr) {
+                finish(resultErr);
+                return;
+              }
+              setAnnotatedImageUrl(status.data.result?.annotated_image_url || null);
               finish(undefined, status.data.result?.violations || []);
             } else if (status.data.status === 'error') {
               finish(status.data.message || 'Processing failed');
@@ -105,15 +123,23 @@ const Detection: React.FC = () => {
   });
 
   const handleFile = useCallback((f: File) => {
-    if (!f.type.startsWith('image/')) { setError('Please select a valid image file'); return; }
+    const isImage = f.type.startsWith('image/');
+    const isVideo = f.type.startsWith('video/');
+    if (!isImage && !isVideo) { setError('Please select a valid image or video file'); return; }
+    if (isImage) setTab('image');
+    if (isVideo) setTab('video');
     setFile(f);
     setViolations([]);
     setSelectedViolation(null);
     setError(null);
     setProgress(0);
-    const reader = new FileReader();
-    reader.onload = () => setPreview(reader.result as string);
-    reader.readAsDataURL(f);
+    if (isImage) {
+      const reader = new FileReader();
+      reader.onload = () => setPreview(reader.result as string);
+      reader.readAsDataURL(f);
+    } else {
+      setPreview(null);
+    }
   }, []);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -132,18 +158,40 @@ const Detection: React.FC = () => {
     return () => stopPolling();
   }, [stopPolling]);
 
+  const isVideoTab = tab === 'video';
+  const acceptAttr = isVideoTab ? 'video/mp4' : 'image/jpeg,image/png';
+
   return (
     <>
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-lg font-heading text-[#EAEAEA] tracking-widest">DETECTION CENTER</h1>
-          <p className="text-xs text-[#6B7280] font-mono mt-0.5 tracking-wider">UPLOAD TRAFFIC IMAGES FOR AI VIOLATION ANALYSIS</p>
+          <p className="text-xs text-[#6B7280] font-mono mt-0.5 tracking-wider">UPLOAD TRAFFIC MEDIA FOR AI VIOLATION ANALYSIS</p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-5">
         <div className="lg:col-span-1 space-y-5">
-          <HudCard title="Upload Image" accent>
+          <HudCard title="Upload" accent>
+            {/* Tab switcher */}
+            <div className="flex gap-1 mb-4" style={{ borderBottom: '1px solid rgba(58,67,79,0.4)', paddingBottom: '12px' }}>
+              {(['image', 'video'] as const).map(t => (
+                <button
+                  key={t}
+                  onClick={() => { setTab(t); setFile(null); setPreview(null); setViolations([]); setError(null); }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono transition-all"
+                  style={{
+                    background: tab === t ? 'rgba(163,255,60,0.1)' : 'transparent',
+                    border: `1px solid ${tab === t ? 'rgba(163,255,60,0.4)' : 'rgba(58,67,79,0.4)'}`,
+                    color: tab === t ? '#A3FF3C' : '#6B7280',
+                  }}
+                >
+                  {t === 'image' ? <ImageIcon className="w-3 h-3" /> : <Video className="w-3 h-3" />}
+                  {t.toUpperCase()}
+                </button>
+              ))}
+            </div>
+
             <div
               onDrop={handleDrop}
               onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
@@ -155,20 +203,26 @@ const Detection: React.FC = () => {
                 background: dragOver ? 'rgba(163,255,60,0.03)' : 'transparent',
               }}
             >
-              <input ref={inputRef} type="file" accept="image/jpeg,image/png" className="hidden" onChange={handleChange} />
-              {preview ? (
+              <input ref={inputRef} type="file" accept={acceptAttr} className="hidden" onChange={handleChange} />
+              {file ? (
                 <div className="space-y-2">
                   <div className="w-12 h-12 mx-auto flex items-center justify-center" style={{ border: '1px solid rgba(163,255,60,0.3)' }}>
-                    <ImageIcon className="w-6 h-6" style={{ color: '#A3FF3C' }} />
+                    {isVideoTab
+                      ? <Video className="w-6 h-6" style={{ color: '#A3FF3C' }} />
+                      : <ImageIcon className="w-6 h-6" style={{ color: '#A3FF3C' }} />}
                   </div>
-                  <p className="text-sm font-mono" style={{ color: '#A3FF3C' }}>{file?.name}</p>
+                  <p className="text-sm font-mono" style={{ color: '#A3FF3C' }}>{file.name}</p>
                   <p className="text-xs text-[#6B7280] font-mono">Click or drop to change</p>
                 </div>
               ) : (
                 <div className="space-y-2">
                   <Upload className="w-8 h-8 mx-auto" style={{ color: '#3A434F' }} />
-                  <p className="text-sm text-[#6B7280] font-mono">Drop image or click</p>
-                  <p className="text-xs" style={{ color: '#3A434F' }}>JPG, PNG · Max 50 MB</p>
+                  <p className="text-sm text-[#6B7280] font-mono">
+                    {isVideoTab ? 'Drop video or click' : 'Drop image or click'}
+                  </p>
+                  <p className="text-xs" style={{ color: '#3A434F' }}>
+                    {isVideoTab ? 'MP4 · Max 100 MB · Every 30th frame' : 'JPG, PNG · Max 50 MB'}
+                  </p>
                 </div>
               )}
             </div>
@@ -237,7 +291,7 @@ const Detection: React.FC = () => {
             {detectMutation.isPending ? (
               <HudSpinner size="lg" text="Running AI detection" />
             ) : (
-              <DetectionCanvas image={preview} violations={violations} onViolationClick={setSelectedViolation} />
+              <DetectionCanvas image={preview} violations={violations} annotatedImageUrl={annotatedImageUrl} onViolationClick={setSelectedViolation} />
             )}
           </HudCard>
 

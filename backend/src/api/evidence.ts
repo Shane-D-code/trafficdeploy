@@ -35,8 +35,7 @@ router.get('/', async (_req, res) => {
 
 router.get('/:id', async (req, res) => {
   try {
-    const result = await db.searchViolations({ limit: 1 });
-    const item = result.rows.find((v: any) => String(v.id) === req.params.id);
+    const item = await db.getViolationById(req.params.id);
     if (!item) {
       res.status(404).json({ success: false, error: 'Evidence not found' });
       return;
@@ -69,6 +68,16 @@ router.get('/:id', async (req, res) => {
 
 router.delete('/:id', async (req, res) => {
   try {
+    const violation = await db.getViolationById(req.params.id);
+    if (!violation) {
+      res.status(404).json({ success: false, error: 'Evidence not found' });
+      return;
+    }
+    // Delete files from disk
+    for (const p of [violation.evidence_path, violation.image_path, (violation as any).annotated_image_path]) {
+      if (p && fs.existsSync(p)) fs.unlinkSync(p);
+    }
+    await db.deleteViolation(req.params.id);
     res.json({ success: true, message: `Evidence ${req.params.id} deleted` });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });

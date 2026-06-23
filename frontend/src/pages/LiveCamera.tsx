@@ -25,15 +25,25 @@ const LiveCamera: React.FC = () => {
     const ws = getWebSocketClient();
     ws.connect();
     const unsub = ws.onMessage((msg: any) => {
-      if (msg.type === 'NEW_VIOLATION' && msg.data) {
-        setViolations(prev => [...prev, { ...msg.data, receivedAt: new Date().toISOString() }].slice(-50));
+      if (msg.type === 'CAMERA_FRAME' && msg.cameraId === selectedCamera.id) {
+        if (msg.frame) {
+          setLastFrame(`data:image/jpeg;base64,${msg.frame}`);
+        }
+        if (msg.violations && msg.violations.length > 0) {
+          setViolations(prev => {
+            const updated = [...msg.violations.map((v: any) => ({ ...v, receivedAt: new Date().toISOString() })), ...prev];
+            return updated.slice(0, 50);
+          });
+        }
+      }
+      if (msg.type === 'NEW_VIOLATION' && msg.data && msg.data.cameraId === selectedCamera.id) {
+        setViolations(prev => [{ ...msg.data, receivedAt: new Date().toISOString() }, ...prev].slice(0, 50));
       }
     });
     fetch(`/api/live/camera/${selectedCamera.id}/start`, { method: 'POST' });
     return () => {
       unsub();
-      ws.disconnect();
-      fetch(`/api/live/camera/${selectedCamera.id}/stop`, { method: 'POST' });
+      fetch(`/api/live/camera/${selectedCamera.id}/stop`, { method: 'POST' }).catch(() => {});
     };
   }, [selectedCamera, isStreaming]);
 

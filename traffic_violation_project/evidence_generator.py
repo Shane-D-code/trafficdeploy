@@ -30,31 +30,138 @@ class EvidenceGenerator:
     Generate police-style evidence reports
     """
 
+    # Color mapping per violation type (BGR)
+    VIOLATION_COLORS = {
+        'NO HELMET':       (0, 0, 255),    # Red
+        'NO_HELMET':       (0, 0, 255),
+        'NO SEATBELT':     (0, 200, 255),  # Yellow-orange
+        'NO_SEATBELT':     (0, 200, 255),
+        'TRIPLE RIDING':   (255, 0, 255),  # Magenta
+        'TRIPLE_RIDING':   (255, 0, 255),
+        'RED LIGHT':       (0, 0, 220),    # Dark red
+        'RED_LIGHT':       (0, 0, 220),
+        'WRONG SIDE':      (255, 50, 0),   # Blue-orange
+        'WRONG_SIDE':      (255, 50, 0),
+        'STOP LINE':       (0, 180, 0),    # Green
+        'STOP_LINE':       (0, 180, 0),
+        'STOP LINE CROSSING':       (0, 180, 0),
+        'STOP_LINE_CROSSING':       (0, 180, 0),
+        'RED SIGNAL OVERRAKING':     (0, 0, 220),   # Dark red
+        'RED_SIGNAL_OVERRAKING':     (0, 0, 220),
+        'ILLEGAL PARKING': (0, 140, 255),  # Orange
+        'ILLEGAL_PARKING': (0, 140, 255),
+    }
+
     def __init__(self, output_dir='evidence'):
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
 
-    def generate_evidence_card(self, image, violation, vehicle_info=None,
-                               plate_info=None):
+    def draw_annotations(self, image: np.ndarray, violations: list) -> np.ndarray:
         """
-        Generate a complete evidence card
+        Draw bounding boxes and labels for all violations on a copy of the image.
+
+        Args:
+            image: BGR numpy array
+            violations: list of violation dicts with 'bbox', 'type'/'violation_type',
+                        'confidence', and optionally 'plate_text'
 
         Returns:
-            Evidence card image path
+            Annotated BGR numpy array
+        """
+        annotated = image.copy()
+
+        for violation in violations:
+            bbox = violation.get('bbox') or violation.get('box')
+            if not bbox or len(bbox) < 4:
+                continue
+
+            x1, y1, x2, y2 = map(int, bbox[:4])
+            vtype = violation.get('type') or violation.get('violation_type', 'UNKNOWN')
+            confidence = violation.get('confidence', 0.0)
+            plate = violation.get('plate_text') or violation.get('plateText') or ''
+
+            color = self.VIOLATION_COLORS.get(vtype, (255, 255, 255))
+
+            # Main bounding box (thick)
+            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 3)
+
+            # Confidence bar above the box (clamp width to box width)
+            bar_width = max(1, int((x2 - x1) * min(confidence, 1.0)))
+            cv2.rectangle(annotated, (x1, max(0, y1 - 6)), (x1 + bar_width, y1), color, -1)
+
+            # Build label lines
+            label_lines = [
+                f"{vtype.replace('_', ' ')}  {confidence * 100:.1f}%",
+            ]
+            if plate:
+                label_lines.append(f"Plate: {plate}")
+
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 0.55
+            thickness = 2
+
+            for i, line in enumerate(label_lines):
+                (text_w, text_h), baseline = cv2.getTextSize(line, font, font_scale, thickness)
+                # Position label above box; if not enough room, put below
+                y_text = y1 - 10 - i * (text_h + 6)
+                if y_text - text_h - baseline < 0:
+                    y_text = y2 + text_h + 6 + i * (text_h + 6)
+
+                # Background rectangle
+                cv2.rectangle(
+                    annotated,
+                    (x1, y_text - text_h - baseline - 2),
+                    (x1 + text_w + 6, y_text + 2),
+                    color,
+                    -1,
+                )
+                # White text
+                cv2.putText(
+                    annotated,
+                    line,
+                    (x1 + 3, y_text - baseline),
+                    font,
+                    font_scale,
+                    (255, 255, 255),
+                    thickness,
+                    cv2.LINE_AA,
+                )
+
+        return annotated
+
+    def generate_evidence_card(self, image, violation, vehicle_info=None,
+                               plate_info=None, all_violations=None):
+        """
+        Generate a complete evidence card with bounding-box annotations.
+
+        Args:
+            image: path string or BGR numpy array
+            violation: primary violation dict (used for the info panel)
+            vehicle_info: optional dict with 'type', 'color'
+            plate_info: unused (kept for API compatibility)
+            all_violations: list of all violation dicts to annotate; if None,
+                            only the primary violation is annotated
+
+        Returns:
+            Path to the saved evidence card image
         """
         if isinstance(image, str):
             image = cv2.imread(image)
             if image is None:
                 raise ValueError(f"Could not read image: {image}")
 
-        h, w = image.shape[:2]
+        # Draw bounding-box annotations for all violations
+        violations_to_draw = all_violations if all_violations is not None else [violation]
+        annotated_image = self.draw_annotations(image, violations_to_draw)
+
+        h, w = annotated_image.shape[:2]
         card_h = h + 280
-        card_w = max(w, 800)
+        border = 15
+        card_w = max(w + 2 * border, 800)
 
         card = np.ones((card_h, card_w, 3), dtype=np.uint8) * 245
 
-        border = 15
-        card[border:border + h, border:border + w] = image
+        card[border:border + h, border:border + w] = annotated_image
 
         self._draw_header(card, violation, card_w)
         self._draw_info_panel(card, violation, vehicle_info, plate_info, h, card_w)

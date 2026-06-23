@@ -1,5 +1,5 @@
 import express from 'express';
-import { getWebSocketServer } from '../websocket/WebSocketServer';
+import { cameraStreamService } from '../services/CameraStreamService';
 
 const router = express.Router();
 
@@ -13,33 +13,36 @@ const cameras = [
 ];
 
 router.get('/cameras', (_req, res) => {
-  res.json({ success: true, data: cameras });
+  const streamingStatus = cameras.map(c => ({
+    ...c,
+    isStreaming: cameraStreamService.isStreaming(c.id),
+  }));
+  res.json({ success: true, data: streamingStatus });
 });
 
-router.post('/camera/:cameraId/start', (req, res) => {
-  const { cameraId } = req.params;
-  const ws = getWebSocketServer();
-  if (ws) {
-    ws.broadcast({
-      type: 'CAMERA_DETECTION_STARTED',
-      cameraId: parseInt(cameraId),
-      timestamp: new Date().toISOString(),
-    });
+router.post('/camera/:cameraId/start', async (req, res) => {
+  const cameraId = parseInt(req.params.cameraId);
+  try {
+    await cameraStreamService.startStream(cameraId);
+    res.json({ success: true, cameraId, message: 'Camera stream started' });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
   }
-  res.json({ success: true, cameraId: parseInt(cameraId) });
 });
 
 router.post('/camera/:cameraId/stop', (req, res) => {
-  const { cameraId } = req.params;
-  const ws = getWebSocketServer();
-  if (ws) {
-    ws.broadcast({
-      type: 'CAMERA_DETECTION_STOPPED',
-      cameraId: parseInt(cameraId),
-      timestamp: new Date().toISOString(),
-    });
-  }
-  res.json({ success: true, cameraId: parseInt(cameraId) });
+  const cameraId = parseInt(req.params.cameraId);
+  cameraStreamService.stopStream(cameraId);
+  res.json({ success: true, cameraId, message: 'Camera stream stopped' });
+});
+
+router.get('/camera/:cameraId/status', (req, res) => {
+  const cameraId = parseInt(req.params.cameraId);
+  res.json({
+    success: true,
+    cameraId,
+    isStreaming: cameraStreamService.isStreaming(cameraId),
+  });
 });
 
 export default router;

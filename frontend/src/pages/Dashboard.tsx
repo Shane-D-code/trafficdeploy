@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { analyticsApi } from '../api/analytics';
 import { WebSocketClient } from '../api/websocket';
+import { useNotifications } from '../context/NotificationContext';
 import { StatsCards } from '../components/dashboard/StatsCards';
 import { ViolationTimeline } from '../components/dashboard/ViolationTimeline';
 import { LiveFeed } from '../components/dashboard/LiveFeed';
@@ -14,6 +15,7 @@ const Dashboard: React.FC = () => {
   const [realtimeStats, setRealtimeStats] = useState<any>(null);
   const [recentViolations, setRecentViolations] = useState<any[]>([]);
   const [isConnected, setIsConnected] = useState(false);
+  const { addNotification } = useNotifications();
 
   const { data: stats, isLoading } = useQuery({
     queryKey: ['dashboardStats'],
@@ -27,17 +29,20 @@ const Dashboard: React.FC = () => {
 
     ws.onMessage((message) => {
       switch (message.type) {
-        case 'NEW_VIOLATION':
+        case 'NEW_VIOLATION': {
+          const v = message.data;
           setRealtimeStats((prev: any) => ({
             ...prev,
             total: (prev?.total || 0) + 1,
-            [message.data.type]: ((prev?.[message.data.type] || 0) + 1)
+            [v.type]: ((prev?.[v.type] || 0) + 1)
           }));
           setRecentViolations((prev: any[]) => [
-            { ...message.data, timestamp: message.timestamp },
+            { ...v, timestamp: message.timestamp },
             ...prev
           ].slice(0, 20));
+          addNotification('warning', `${v.type} detected${v.plateText ? ` - ${v.plateText}` : ''}`);
           break;
+        }
         case 'JOB_PROGRESS':
           console.log(`Job ${message.jobId}: ${message.progress}%`);
           break;

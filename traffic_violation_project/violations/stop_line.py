@@ -40,18 +40,23 @@ class StopLineDetector(BaseViolationDetector):
 
     def _detect_stop_lines(self, image):
         try:
+            h, w = image.shape[:2]
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            edges = cv2.Canny(gray, 50, 150)
-            lines = cv2.HoughLinesP(edges, rho=1, theta=np.pi/180, threshold=50, minLineLength=50, maxLineGap=10)
+            blur = cv2.GaussianBlur(gray, (5, 5), 0)
+            edges = cv2.Canny(blur, 150, 300)
+            min_len = int(w * 0.25)
+            lines = cv2.HoughLinesP(edges, rho=1, theta=np.pi/180, threshold=100, minLineLength=min_len, maxLineGap=20)
             if lines is None:
                 return []
-            h, w = image.shape[:2]
             stop_lines = []
             for line in lines:
                 x1, y1, x2, y2 = line[0]
                 angle = np.arctan2(y2 - y1, x2 - x1) * 180 / np.pi
                 if abs(angle) < 10 or abs(abs(angle) - 180) < 10:
-                    if abs(y1 - h * 0.7) < h * 0.2:
+                    line_len = np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+                    if line_len < w * 0.3:
+                        continue
+                    if abs(y1 - h * 0.7) < h * 0.1:
                         stop_lines.append(line[0])
             return stop_lines
         except Exception as e:

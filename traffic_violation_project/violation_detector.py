@@ -291,9 +291,33 @@ class ViolationDetector:
         # TRIPLE RIDING
         for vehicle in vehicles:
             vbox = vehicle["box"]
-            rider_count = sum(
-                1 for r in riders if self.compute_iou(vbox, r["box"]) > 0.1
-            )
+            vw = vbox[2] - vbox[0]
+            vh = vbox[3] - vbox[1]
+
+            # Skip wide vehicles (cars, buses) — likely not two-wheelers
+            if vw > 0 and vw / vh > 0.65:
+                continue
+
+            # Expand vehicle box upward to catch riders sitting on top
+            x1, y1, x2, y2 = vbox
+            expanded_top = y1 - vh * 0.8
+            expanded_bottom = y2 + vh * 0.1
+            expanded_left = x1 - vw * 0.1
+            expanded_right = x2 + vw * 0.1
+
+            rider_count = 0
+            for r in riders:
+                rx1, ry1, rx2, ry2 = r["box"]
+                ix1 = max(expanded_left, rx1)
+                iy1 = max(expanded_top, ry1)
+                ix2 = min(expanded_right, rx2)
+                iy2 = min(expanded_bottom, ry2)
+                if ix1 < ix2 and iy1 < iy2:
+                    inter = (ix2 - ix1) * (iy2 - iy1)
+                    rider_area = (rx2 - rx1) * (ry2 - ry1)
+                    if rider_area > 0 and inter / rider_area > 0.1:
+                        rider_count += 1
+
             if rider_count > 2:
                 plate = self.extract_plate_text(original_image, vbox)
                 violations.append(

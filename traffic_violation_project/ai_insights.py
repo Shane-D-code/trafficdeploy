@@ -129,3 +129,118 @@ def generate_insights_summary(violations: List[Dict]) -> str:
         lines.append(f"Top Offender: {offenders[0]['plate']} ({offenders[0]['count']} violations)")
 
     return "\n".join(lines)
+
+
+class AIInsights:
+    """
+    AI-powered insights class used by run_complete_pipeline.py
+    Wraps the standalone analysis functions with a DB-backed interface.
+    """
+
+    def __init__(self, db_path: str = 'traffic_violations.db'):
+        self.db_path = db_path
+
+    def _load_violations(self) -> List[Dict]:
+        try:
+            from utils import get_all_violations
+            return get_all_violations(db_path=self.db_path)
+        except Exception as e:
+            logger.warning(f"Could not load violations from DB: {e}")
+            return []
+
+    def predict_trends(self, days_ahead: int = 7) -> Dict:
+        violations = self._load_violations()
+        if not violations:
+            return {'predictions': {}, 'error': 'No data available'}
+
+        by_type = {}
+        for v in violations:
+            t = v.get('violation_type', v.get('type', 'UNKNOWN'))
+            by_type[t] = by_type.get(t, 0) + 1
+
+        avg_per_day = max(1, len(violations) / 30)
+        predictions = {
+            vtype: round(count + avg_per_day * days_ahead * (count / len(violations)))
+            for vtype, count in by_type.items()
+        }
+
+        return {
+            'predictions': predictions,
+            'total_predicted': sum(predictions.values()),
+            'days_ahead': days_ahead,
+        }
+
+    def detect_anomalies(self) -> List[Dict]:
+        violations = self._load_violations()
+        if not violations:
+            return []
+
+        by_type = {}
+        for v in violations:
+            t = v.get('violation_type', v.get('type', 'UNKNOWN'))
+            by_type[t] = by_type.get(t, 0) + 1
+
+        if not by_type:
+            return []
+
+        mean = sum(by_type.values()) / len(by_type)
+        std = (sum((c - mean) ** 2 for c in by_type.values()) / len(by_type)) ** 0.5 or 1
+        threshold = mean + std
+
+        anomalies = []
+        for vtype, count in by_type.items():
+            if count > threshold:
+                anomalies.append({
+                    'type': vtype,
+                    'count': count,
+                    'expected': round(mean, 1),
+                    'severity': 'high' if count > mean + 2 * std else 'medium',
+                })
+
+        return anomalies
+
+    def peak_hour_analysis(self) -> Dict:
+        violations = self._load_violations()
+        if not violations:
+            return {'error': 'No data', 'peak_period': 'N/A'}
+
+        hours = {}
+        for v in violations:
+            ts = v.get('timestamp', '')
+            try:
+                hour = datetime.fromisoformat(ts.replace('Z', '+00:00')).hour
+                hours[hour] = hours.get(hour, 0) + 1
+            except Exception:
+                continue
+
+        if not hours:
+            return {'error': 'No timestamp data', 'peak_period': 'N/A'}
+
+        peak_hour = max(hours.items(), key=lambda x: x[1])
+        return {
+            'peak_period': f"{peak_hour[0]}:00 - {peak_hour[0] + 1}:00",
+            'peak_count': peak_hour[1],
+            'hourly_distribution': hours,
+        }
+
+    def generate_insight_report(self) -> Dict:
+        violations = self._load_violations()
+
+        if not violations:
+            return {
+                'summary': 'No violations recorded.',
+                'junctions': [],
+                'offenders': [],
+                'trends': {},
+                'anomalies': [],
+                'peak': {},
+            }
+
+        return {
+            'summary': generate_insights_summary(violations),
+            'junctions': get_dangerous_junctions(violations),
+            'offenders': get_repeat_offenders(violations),
+            'trends': self.predict_trends(),
+            'anomalies': self.detect_anomalies(),
+            'peak': self.peak_hour_analysis(),
+        }

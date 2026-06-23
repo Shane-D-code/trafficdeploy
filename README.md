@@ -36,7 +36,7 @@ AI-powered traffic violation detection system using YOLOv8 and EasyOCR for India
 | Backend | Python 3.9+ |
 | ML Framework | PyTorch, Ultralytics YOLOv8 |
 | OCR | EasyOCR |
-| Frontend | Streamlit |
+| Frontend | React / Vite |
 | Database | SQLite |
 | Visualization | Plotly, Matplotlib |
 | Processing | OpenCV, NumPy |
@@ -48,21 +48,12 @@ cd traffic_violation_project
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-streamlit run app.py
-```
-
-### Docker
-
-```bash
-docker build -t gridlock .
-docker run -p 8501:8501 gridlock
 ```
 
 ## Project Structure
 
 ```
 traffic_violation_project/
-├── app.py                          # Streamlit web application
 ├── violation_detector.py           # Core violation detection engine
 ├── license_plate_recognition.py    # License plate OCR pipeline
 ├── preprocessing.py                # Image enhancement (CLAHE, denoise)

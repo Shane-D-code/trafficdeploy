@@ -9,6 +9,8 @@ import ViolationLogs from './pages/ViolationLogs';
 import Evidence from './pages/Evidence';
 import Settings from './pages/Settings';
 import Review from './pages/Review';
+import Insights from './pages/Insights';
+import Metrics from './pages/Metrics';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 
 export default function App() {
@@ -26,6 +28,8 @@ export default function App() {
           <Route path="evidence" element={<Evidence />} />
           <Route path="settings" element={<Settings />} />
           <Route path="review" element={<Review />} />
+          <Route path="insights" element={<Insights />} />
+          <Route path="metrics" element={<Metrics />} />
         </Route>
       </Routes>
     </ErrorBoundary>

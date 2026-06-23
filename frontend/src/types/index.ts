@@ -22,6 +22,9 @@ export interface DetectionResult {
     totalPlates: number;
     validPlates: number;
   };
+  annotated_image_url?: string;
+  frames_processed?: number;
+  error?: string;
 }
 
 export interface Detection {

@@ -4,6 +4,7 @@ import type { Violation } from '../../types';
 interface DetectionCanvasProps {
   image: string | null;
   violations: Violation[];
+  annotatedImageUrl?: string | null;
   onViolationClick?: (violation: Violation) => void;
 }
 
@@ -17,7 +18,7 @@ const CLASS_COLORS: Record<string, string> = {
   ILLEGAL_PARKING: '#FFD43B',
 };
 
-const DetectionCanvas: React.FC<DetectionCanvasProps> = ({ image, violations, onViolationClick }) => {
+const DetectionCanvas: React.FC<DetectionCanvasProps> = ({ image, violations, annotatedImageUrl, onViolationClick }) => {
   if (!image) {
     return (
       <div className="aspect-video rounded-lg flex items-center justify-center" style={{ background: '#0B0F13', border: '1px solid rgba(58,67,79,0.3)' }}>
@@ -32,10 +33,12 @@ const DetectionCanvas: React.FC<DetectionCanvasProps> = ({ image, violations, on
     );
   }
 
+  const displayImage = annotatedImageUrl || image;
+
   return (
     <div className="relative inline-block w-full rounded-lg overflow-hidden scan-overlay">
-      <img src={image} alt="Detection" className="w-full" />
-      {violations.map((v, i) => {
+      <img src={displayImage} alt="Detection" className="w-full" />
+      {!annotatedImageUrl && violations.map((v, i) => {
         const [x1, y1, x2, y2] = v.bbox;
         const color = CLASS_COLORS[v.type] || '#A3FF3C';
         return (

@@ -56,7 +56,9 @@ export class DetectionService extends EventEmitter {
     getWS().broadcastJobProgress(jobId, 0, 'processing');
 
     try {
+      const inferenceStart = Date.now();
       const result = await this.bridge.detectImage(imagePath, options);
+      const inferenceTimeMs = Date.now() - inferenceStart;
 
       jobEntry.status = 'complete';
       jobEntry.progress = 100;
@@ -67,9 +69,14 @@ export class DetectionService extends EventEmitter {
 
       let savedCount = 0;
       const annotatedImagePath = result.annotated_image_path || null;
+      // Divide total inference time evenly across violations so per-violation queries are meaningful
+      const perViolationMs = result.violations.length > 0
+        ? Math.round(inferenceTimeMs / result.violations.length)
+        : inferenceTimeMs;
       for (const violation of result.violations) {
         try {
-          await this.db.saveViolation({ ...violation, job_id: jobId, annotated_image_path: annotatedImagePath });
+          const meta = JSON.stringify({ inference_time_ms: perViolationMs });
+          await this.db.saveViolation({ ...violation, job_id: jobId, annotated_image_path: annotatedImagePath, metadata: meta });
           savedCount++;
           getWS().broadcastViolation({ ...violation, jobId, annotatedImagePath, savedAt: new Date().toISOString() });
         } catch (error) {
@@ -114,7 +121,9 @@ export class DetectionService extends EventEmitter {
     getWS().broadcastJobProgress(jobId, 0, 'processing');
 
     try {
+      const inferenceStart = Date.now();
       const result = await this.bridge.detectVideo(videoPath, options);
+      const inferenceTimeMs = Date.now() - inferenceStart;
 
       jobEntry.status = 'complete';
       jobEntry.progress = 100;
@@ -125,10 +134,13 @@ export class DetectionService extends EventEmitter {
 
       let savedCount = 0;
       const annotatedImagePath = result.annotated_image_path || null;
+      const violationCount = result.violations?.length || 1;
+      const perViolationMs = Math.round(inferenceTimeMs / violationCount);
       if (result.violations) {
         for (const violation of result.violations) {
           try {
-            await this.db.saveViolation({ ...violation, job_id: jobId, annotated_image_path: annotatedImagePath });
+            const meta = JSON.stringify({ inference_time_ms: perViolationMs });
+            await this.db.saveViolation({ ...violation, job_id: jobId, annotated_image_path: annotatedImagePath, metadata: meta });
             savedCount++;
             getWS().broadcastViolation({ ...violation, jobId, annotatedImagePath, savedAt: new Date().toISOString() });
           } catch (error) {
