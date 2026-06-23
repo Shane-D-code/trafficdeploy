@@ -1,0 +1,66 @@
+services:
+  - type: web
+    name: gridlock-backend
+    runtime: node
+    plan: free
+    region: oregon
+
+    rootDir: backend
+    buildCommand: |
+      echo "Installing Node dependencies..."
+      npm install --production=false
+      echo "Building TypeScript..."
+      npm run build
+      echo "Installing Python dependencies..."
+      cd ../traffic_violation_project
+      pip install -r requirements.txt
+      echo "Build complete"
+
+    startCommand: node dist/app.js
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 5000
+      - key: PYTHON_PATH
+        value: python3
+      - key: PYTHON_MODULE_PATH
+        value: /opt/render/project/src/traffic_violation_project
+      - key: DB_PATH
+        value: /opt/render/project/src/data/traffic_violations.db
+      - key: HF_TOKEN
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CORS_ORIGIN
+        value: https://gridlock-frontend.onrender.com
+
+    healthCheckPath: /api/health
+
+    disk:
+      name: gridlock-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1
+
+  - type: static
+    name: gridlock-frontend
+    runtime: node
+    plan: free
+    region: oregon
+
+    rootDir: frontend
+    buildCommand: |
+      echo "Installing frontend dependencies..."
+      npm install
+      echo "Building React app..."
+      npm run build
+      echo "Frontend build complete"
+
+    staticPublishPath: ./dist
+
+    envVars:
+      - key: VITE_API_URL
+        value: https://gridlock-backend.onrender.com/api
+      - key: VITE_WS_URL
+        value: wss://gridlock-backend.onrender.com/ws

@@ -4,6 +4,11 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+try:
+    import model_loader
+except ImportError as e:
+    logging.warning(f"Model loader not available: {e}")
+
 import cv2
 import numpy as np
 import torch

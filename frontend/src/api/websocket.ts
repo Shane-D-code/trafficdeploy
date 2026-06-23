@@ -1,3 +1,5 @@
+import { WS_URL } from './client';
+
 type MessageHandler = (message: any) => void;
 
 let socket: WebSocket | null = null;
@@ -10,7 +12,7 @@ const MAX_RECONNECT_ATTEMPTS = 20;
 function getUrl(): string {
   const wsUrl = import.meta.env.VITE_WS_URL;
   if (wsUrl) return wsUrl;
-  return 'ws://127.0.0.1:4000/ws';
+  return WS_URL;
 }
 
 function sendRaw(data: any) {

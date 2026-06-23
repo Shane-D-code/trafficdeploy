@@ -11,3 +11,6 @@ uploads/*
 data/*
 !data/.gitkeep
 traffic_violation_project/evidence/
+*.pt
+*.onnx
+traffic_violation_project/venv/

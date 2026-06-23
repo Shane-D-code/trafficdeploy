@@ -23,7 +23,8 @@ export class PythonBridge extends EventEmitter {
   private findPythonPath(): string {
     const paths = [
       process.env.PYTHON_PATH,
-      '/Users/shantanu/Gridlock/traffic_violation_project/venv/bin/python3',
+      '/opt/render/project/src/.venv/bin/python3',
+      '/usr/local/bin/python3',
       '/usr/bin/python3',
       '/opt/homebrew/bin/python3',
       'python3',
@@ -31,7 +32,6 @@ export class PythonBridge extends EventEmitter {
     ];
     for (const p of paths) {
       if (p && (p === 'python3' || p === 'python' || fs.existsSync(p))) {
-        // For bare names, check they're on PATH
         if (p === 'python3' || p === 'python') {
           try {
             require('child_process').execSync(`${p} --version`, { stdio: 'pipe' });
@@ -47,9 +47,11 @@ export class PythonBridge extends EventEmitter {
   private findModulePath(): string {
     const paths = [
       process.env.PYTHON_MODULE_PATH,
+      '/opt/render/project/src/traffic_violation_project',
       path.resolve(__dirname, '../../../traffic_violation_project'),
       path.resolve(__dirname, '../../../../traffic_violation_project'),
-      path.join(process.cwd(), 'traffic_violation_project')
+      path.join(process.cwd(), 'traffic_violation_project'),
+      path.join(process.cwd(), '..', 'traffic_violation_project'),
     ];
     for (const p of paths) {
       if (p && fs.existsSync(p)) {
