@@ -1,20 +1,26 @@
 services:
   - type: web
     name: gridlock-backend
-    runtime: image
+    runtime: docker
     plan: free
     region: oregon
-    image:
-      url: node:20-bullseye
-      command: |
-        apt-get update && apt-get install -y python3 python3-pip
-        cd /opt/render/project/src/backend
-        npm install --omit=dev
-        npm run build
-        node dist/app.js
+    dockerfilePath: ./Dockerfile
     envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 5000
+      - key: PYTHON_PATH
+        value: /usr/bin/python3
+      - key: PYTHON_MODULE_PATH
+        value: /opt/render/project/src/traffic_violation_project
+      - key: DB_PATH
+        value: /opt/render/project/src/data/traffic_violations.db
       - key: HF_TOKEN
         sync: false
+      - key: JWT_SECRET
+        generateValue: true
+    healthCheckPath: /api/health
 
   - type: web
     name: gridlock-frontend
@@ -26,3 +32,8 @@ services:
       npm install
       npm run build
     startCommand: npx serve -s dist -l 3000
+    envVars:
+      - key: VITE_API_URL
+        value: https://gridlock-backend.onrender.com/api
+      - key: VITE_WS_URL
+        value: wss://gridlock-backend.onrender.com/ws
