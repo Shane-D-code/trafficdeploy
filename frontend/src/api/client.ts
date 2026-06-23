@@ -10,7 +10,9 @@ const getWsUrl = () => {
 
 export const WS_URL = getWsUrl();
 
+const API_BASE = import.meta.env.VITE_API_URL || '/api';
+
 export const apiClient = axios.create({
-  baseURL: '/api',
+  baseURL: API_BASE,
   timeout: 300000,
 });

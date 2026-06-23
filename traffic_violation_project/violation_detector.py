@@ -140,7 +140,7 @@ class ViolationDetector:
             else:
                 logger.warning("%s model not found at %s, skipping", name, path)
 
-        self.person_model = YOLO('models/yolov8n.pt')
+        self.person_model = YOLO('yolov8n.pt')
         print("DEBUG: Person model loaded successfully", file=sys.stderr)
         if self.device == "cuda" and torch.cuda.is_available():
             self.person_model.to("cuda")
