@@ -6,7 +6,7 @@ services:
     region: oregon
     rootDir: backend
     buildCommand: |
-      npm install
+      npm install --production=false
       npm run build
     startCommand: node dist/app.js
     envVars:

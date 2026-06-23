@@ -380,6 +380,82 @@ export class DatabaseService {
     return row || null;
   }
 
+  async getViolation(id: number): Promise<any> {
+    const row = this.db.prepare('SELECT * FROM violations WHERE id = ?').get(id) as any;
+    if (row) {
+      try { row.bbox = JSON.parse(row.bbox || '[]'); } catch {}
+      try { row.metadata = JSON.parse(row.metadata || '{}'); } catch {}
+    }
+    return row;
+  }
+
+  async getViolationByEvidenceId(evidenceId: string): Promise<any> {
+    const row = this.db.prepare('SELECT * FROM violations WHERE evidence_id = ?').get(evidenceId) as any;
+    if (row) {
+      try { row.bbox = JSON.parse(row.bbox || '[]'); } catch {}
+      try { row.metadata = JSON.parse(row.metadata || '{}'); } catch {}
+    }
+    return row;
+  }
+
+  async getViolationsByType(type: string, limit: number = 100): Promise<any[]> {
+    const rows = this.db.prepare(
+      'SELECT * FROM violations WHERE violation_type = ? ORDER BY timestamp DESC LIMIT ?'
+    ).all(type, limit) as any[];
+    return rows.map(row => {
+      try { row.bbox = JSON.parse(row.bbox || '[]'); } catch {}
+      try { row.metadata = JSON.parse(row.metadata || '{}'); } catch {}
+      return row;
+    });
+  }
+
+  async searchViolationsByPlate(plate: string, limit: number = 100): Promise<any[]> {
+    const rows = this.db.prepare(
+      'SELECT * FROM violations WHERE plate_text LIKE ? ORDER BY timestamp DESC LIMIT ?'
+    ).all(`%${plate}%`, limit) as any[];
+    return rows.map(row => {
+      try { row.bbox = JSON.parse(row.bbox || '[]'); } catch {}
+      try { row.metadata = JSON.parse(row.metadata || '{}'); } catch {}
+      return row;
+    });
+  }
+
+  async updateViolationByEvidenceId(evidenceId: string, status: string, notes?: string): Promise<boolean> {
+    const result = this.db.prepare(
+      `UPDATE violations SET status = ?, officer_notes = ?, reviewed_at = ? WHERE evidence_id = ?`
+    ).run(status, notes || '', new Date().toISOString(), evidenceId);
+    return result.changes > 0;
+  }
+
+  async updateJobProgress(jobId: string, progress: number, status: string = 'processing'): Promise<void> {
+    this.db.prepare(
+      'UPDATE jobs SET progress = ?, status = ?, updated_at = ? WHERE id = ?'
+    ).run(progress, status, new Date().toISOString(), jobId);
+  }
+
+  async completeJob(jobId: string, result: any): Promise<void> {
+    this.db.prepare(
+      "UPDATE jobs SET status = 'completed', result = ?, updated_at = ? WHERE id = ?"
+    ).run(JSON.stringify(result), new Date().toISOString(), jobId);
+  }
+
+  async failJob(jobId: string, error: string): Promise<void> {
+    this.db.prepare(
+      "UPDATE jobs SET status = 'failed', error = ?, updated_at = ? WHERE id = ?"
+    ).run(error, new Date().toISOString(), jobId);
+  }
+
+  async getSetting(key: string): Promise<string | null> {
+    const row = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as any;
+    return row ? row.value : null;
+  }
+
+  async setSetting(key: string, value: string): Promise<void> {
+    this.db.prepare(
+      'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)'
+    ).run(key, value);
+  }
+
   close(): void {
     this.db.close();
   }

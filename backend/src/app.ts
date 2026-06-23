@@ -15,7 +15,7 @@ import apiRoutes from './api';
 import { getWebSocketServer } from './websocket/WebSocketServer';
 
 const app = express();
-const PORT = Number(process.env.PORT) || 5000;
+const PORT = parseInt(process.env.PORT || '5000', 10);
 
 const uploadDir = path.resolve(__dirname, process.env.UPLOAD_DIR || '../../uploads');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
