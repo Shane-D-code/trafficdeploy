@@ -33,11 +33,11 @@ export class DetectionService extends EventEmitter {
   private db: DatabaseService;
   private jobs: Map<string, JobEntry>;
 
-  constructor() {
+  constructor(db?: DatabaseService, bridge?: PythonBridge) {
     super();
     this.on('error', () => {});
-    this.bridge = new PythonBridge();
-    this.db = new DatabaseService();
+    this.bridge = bridge || new PythonBridge();
+    this.db = db || new DatabaseService();
     this.jobs = new Map();
   }
 

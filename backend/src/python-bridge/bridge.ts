@@ -16,7 +16,7 @@ export class PythonBridge extends EventEmitter {
     console.log(`[PythonBridge] Module: ${this.modulePath}`);
 
     if (!fs.existsSync(this.modulePath)) {
-      throw new Error(`Python module path not found: ${this.modulePath}`);
+      console.warn(`[PythonBridge] Module path not found: ${this.modulePath}. Detection will fail at runtime.`);
     }
   }
 
@@ -58,7 +58,8 @@ export class PythonBridge extends EventEmitter {
         return p;
       }
     }
-    throw new Error('Could not find traffic_violation_project directory');
+    console.warn('[PythonBridge] Could not find traffic_violation_project directory');
+    return process.env.PYTHON_MODULE_PATH || '/opt/render/project/src/traffic_violation_project';
   }
 
   detectImage(imagePath: string, options: { confidenceThreshold: number; enablePreprocessing: boolean; useEnhancedModels?: boolean }): Promise<any> {

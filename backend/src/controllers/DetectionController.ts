@@ -1,89 +1,117 @@
 import { Request, Response } from 'express';
 import { DetectionService } from '../services/DetectionService';
+import { PythonBridge } from '../python-bridge/bridge';
+import { DatabaseService } from '../services/DatabaseService';
 import { v4 as uuidv4 } from 'uuid';
-import fs from 'fs';
 
-const detectionService = new DetectionService();
+export class DetectionController {
+  private detectionService: DetectionService;
 
-export const detectImage = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const file = req.file;
-    if (!file) { res.status(400).json({ success: false, error: 'No image file provided' }); return; }
-
-    const jobId = uuidv4();
-    const confidence = parseFloat(req.body.confidence) || 0.05;
-    const preprocess = req.body.preprocess !== 'false';
-    const useEnhanced = req.body.enhanced === 'true' || req.body.enhanced === true;
-
-    detectionService.processImage(jobId, file.path, {
-      confidenceThreshold: confidence,
-      enablePreprocessing: preprocess,
-      useEnhancedModels: useEnhanced
-    });
-
-    res.json({
-      success: true,
-      jobId,
-      enhanced: useEnhanced,
-      message: useEnhanced
-        ? 'Image processing started with enhanced models (VehicleNet + StreetSignSense + EULPR)'
-        : 'Image processing started'
-    });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+  constructor(detectionService?: DetectionService) {
+    if (detectionService) {
+      this.detectionService = detectionService;
+    } else {
+      const db = new DatabaseService();
+      const bridge = new PythonBridge();
+      this.detectionService = new DetectionService(db, bridge);
+    }
   }
-};
 
-export const detectVideo = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const file = req.file;
-    if (!file) { res.status(400).json({ success: false, error: 'No video file provided' }); return; }
+  detectImage = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const file = req.file;
+      if (!file) {
+        res.status(400).json({ success: false, error: 'No image file provided' });
+        return;
+      }
 
-    const jobId = uuidv4();
-    const confidence = parseFloat(req.body.confidence) || 0.05;
-    const frameInterval = parseInt(req.body.frameInterval) || 30;
-    const maxFrames = parseInt(req.body.maxFrames) || 100;
-    const useEnhanced = req.body.enhanced === 'true' || req.body.enhanced === true;
+      const jobId = uuidv4();
+      const confidence = parseFloat(req.body.confidence) || 0.05;
+      const preprocess = req.body.preprocess !== 'false';
+      const useEnhanced = req.body.enhanced === 'true' || req.body.enhanced === true;
 
-    detectionService.processVideo(jobId, file.path, {
-      confidenceThreshold: confidence,
-      frameInterval,
-      maxFrames,
-      useEnhancedModels: useEnhanced
-    });
+      this.detectionService.processImage(jobId, file.path, {
+        confidenceThreshold: confidence,
+        enablePreprocessing: preprocess,
+        useEnhancedModels: useEnhanced
+      });
 
-    res.json({
-      success: true,
-      jobId,
-      enhanced: useEnhanced,
-      message: useEnhanced
-        ? 'Video processing started with enhanced models (VehicleNet + StreetSignSense + EULPR)'
-        : 'Video processing started'
-    });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-};
+      res.json({
+        success: true,
+        jobId,
+        enhanced: useEnhanced,
+        message: useEnhanced
+          ? 'Image processing started with enhanced models'
+          : 'Image processing started'
+      });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  };
 
-export const getJobStatus = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { jobId } = req.params;
-    const status = await detectionService.getJobStatus(jobId);
-    if (!status) { res.status(404).json({ success: false, error: 'Job not found' }); return; }
-    res.json({ success: true, status: status.status, progress: status.progress, message: status.message, result: status.result });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-};
+  detectVideo = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const file = req.file;
+      if (!file) {
+        res.status(400).json({ success: false, error: 'No video file provided' });
+        return;
+      }
 
-export const getJobResults = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { jobId } = req.params;
-    const status = await detectionService.getJobStatus(jobId);
-    if (!status) { res.status(404).json({ success: false, error: 'Job not found' }); return; }
-    if (status.status !== 'complete') { res.status(400).json({ success: false, error: 'Job is not complete yet' }); return; }
-    res.json({ success: true, result: status.result });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-};
+      const jobId = uuidv4();
+      const confidence = parseFloat(req.body.confidence) || 0.05;
+      const frameInterval = parseInt(req.body.frameInterval) || 30;
+      const maxFrames = parseInt(req.body.maxFrames) || 100;
+      const useEnhanced = req.body.enhanced === 'true' || req.body.enhanced === true;
+
+      this.detectionService.processVideo(jobId, file.path, {
+        confidenceThreshold: confidence,
+        frameInterval,
+        maxFrames,
+        useEnhancedModels: useEnhanced
+      });
+
+      res.json({
+        success: true,
+        jobId,
+        enhanced: useEnhanced,
+        message: useEnhanced
+          ? 'Video processing started with enhanced models'
+          : 'Video processing started'
+      });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  };
+
+  getJobStatus = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { jobId } = req.params;
+      const status = await this.detectionService.getJobStatus(jobId);
+      if (!status) {
+        res.status(404).json({ success: false, error: 'Job not found' });
+        return;
+      }
+      res.json({ success: true, status: status.status, progress: status.progress, message: status.message, result: status.result });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  };
+
+  getJobResults = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { jobId } = req.params;
+      const status = await this.detectionService.getJobStatus(jobId);
+      if (!status) {
+        res.status(404).json({ success: false, error: 'Job not found' });
+        return;
+      }
+      if (status.status !== 'complete') {
+        res.status(400).json({ success: false, error: 'Job is not complete yet' });
+        return;
+      }
+      res.json({ success: true, result: status.result });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  };
+}
