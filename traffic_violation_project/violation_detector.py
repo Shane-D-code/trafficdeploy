@@ -135,6 +135,11 @@ class ViolationDetector:
             else:
                 logger.warning("%s model not found at %s, skipping", name, path)
 
+        self.person_model = YOLO('models/yolov8n.pt')
+        print("DEBUG: Person model loaded successfully", file=sys.stderr)
+        if self.device == "cuda" and torch.cuda.is_available():
+            self.person_model.to("cuda")
+
         self.plate_recognizer = LicensePlateRecognizer(
             plate_model_path if plate_model_path else None, device
         )
@@ -460,6 +465,23 @@ class ViolationDetector:
         # 3. Red signal / wrong side model — ML violation detection + plate hints
         ml_violations, plate_hints = self._run_redsignal_model(proc_image, redsignal_conf)
 
+        # 4. Person detection model (COCO yolov8n) — for triple riding clustering fallback
+        person_results = self.person_model(proc_image, conf=base_conf, verbose=False)
+        person_detections = []
+        if len(person_results) > 0 and person_results[0].boxes is not None:
+            for box in person_results[0].boxes:
+                cls = int(box.cls.item())
+                if cls == 0:
+                    x1, y1, x2, y2 = box.xyxy[0].tolist()
+                    conf = box.conf.item()
+                    person_detections.append({
+                        'bbox': [x1, y1, x2, y2],
+                        'confidence': conf
+                    })
+        print(f"DEBUG: Raw person detections = {len(person_detections)}", file=sys.stderr)
+        for i, p in enumerate(person_detections[:5]):
+            print(f"DEBUG: Person {i}: bbox={p['bbox']}, conf={p['confidence']:.3f}", file=sys.stderr)
+
         # --- STRIP OVERLAPPING BASE MODEL DETECTIONS (specialized models win) ---
         helmet_model_boxes = [d["box"] for d in h_helmet + h_no_helmet]
         seatbelt_model_boxes = [d["box"] for d in s_seatbelt + s_no_seatbelt]
@@ -717,6 +739,55 @@ class ViolationDetector:
                             })
                             triple_riding_flagged = True
                             break
+
+        # Path C: Person-model-based center-distance clustering fallback
+        print("DEBUG: Entering triple-riding clustering block", file=sys.stderr)
+        person_bboxes = [p['bbox'] for p in person_detections if p.get('bbox') is not None]
+        if not triple_riding_flagged and len(person_bboxes) >= 3:
+            centers = [
+                ((b[0] + b[2]) / 2, (b[1] + b[3]) / 2)
+                for b in person_bboxes
+            ]
+            threshold_distance = 250
+
+            groups = []
+            for i, bbox in enumerate(person_bboxes):
+                assigned = False
+                for group in groups:
+                    for idx in group:
+                        dist = ((centers[i][0] - centers[idx][0]) ** 2 +
+                                (centers[i][1] - centers[idx][1]) ** 2) ** 0.5
+                        if dist < threshold_distance:
+                            group.append(i)
+                            assigned = True
+                            break
+                    if assigned:
+                        break
+                if not assigned:
+                    groups.append([i])
+
+            print(f"DEBUG: Groups formed = {len(groups)}", file=sys.stderr)
+            for gi, g in enumerate(groups):
+                print(f"DEBUG: Group {gi} has {len(g)} persons", file=sys.stderr)
+
+            for group in groups:
+                if len(group) >= 3:
+                    bboxes = [person_bboxes[idx] for idx in group]
+                    x1 = min(b[0] for b in bboxes)
+                    y1 = min(b[1] for b in bboxes)
+                    x2 = max(b[2] for b in bboxes)
+                    y2 = max(b[3] for b in bboxes)
+                    avg_conf = sum(person_detections[idx]['confidence'] for idx in group) / len(group)
+                    violations.append({
+                        "type": "TRIPLE RIDING",
+                        "violation_type": "TRIPLE RIDING",
+                        "confidence": avg_conf,
+                        "bbox": [x1, y1, x2, y2],
+                        "timestamp": now,
+                        "rider_count": len(group),
+                        "source": "person_cluster",
+                    })
+                    triple_riding_flagged = True
 
         # Rule-based violations
         for DetectorClass in [

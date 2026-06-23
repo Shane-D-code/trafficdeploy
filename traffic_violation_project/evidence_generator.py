@@ -3,6 +3,9 @@ evidence_generator.py - Professional Evidence Generation
 Includes police-style challan (e-challan) PDF generation
 """
 
+import sys
+from typing import Optional
+
 import cv2
 import numpy as np
 import os

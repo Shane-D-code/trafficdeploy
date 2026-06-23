@@ -11,7 +11,7 @@ export const detectImage = async (req: Request, res: Response): Promise<void> =>
     if (!file) { res.status(400).json({ success: false, error: 'No image file provided' }); return; }
 
     const jobId = uuidv4();
-    const confidence = parseFloat(req.body.confidence) || 0.25;
+    const confidence = parseFloat(req.body.confidence) || 0.05;
     const preprocess = req.body.preprocess !== 'false';
     const useEnhanced = req.body.enhanced === 'true' || req.body.enhanced === true;
 
@@ -40,7 +40,7 @@ export const detectVideo = async (req: Request, res: Response): Promise<void> =>
     if (!file) { res.status(400).json({ success: false, error: 'No video file provided' }); return; }
 
     const jobId = uuidv4();
-    const confidence = parseFloat(req.body.confidence) || 0.25;
+    const confidence = parseFloat(req.body.confidence) || 0.05;
     const frameInterval = parseInt(req.body.frameInterval) || 30;
     const maxFrames = parseInt(req.body.maxFrames) || 100;
     const useEnhanced = req.body.enhanced === 'true' || req.body.enhanced === true;

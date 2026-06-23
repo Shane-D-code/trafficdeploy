@@ -10,9 +10,7 @@ const MAX_RECONNECT_ATTEMPTS = 20;
 function getUrl(): string {
   const wsUrl = import.meta.env.VITE_WS_URL;
   if (wsUrl) return wsUrl;
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const host = window.location.host;
-  return `${protocol}//${host}/ws`;
+  return 'ws://127.0.0.1:5000/ws';
 }
 
 function sendRaw(data: any) {
